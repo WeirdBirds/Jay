@@ -31,3 +31,6 @@
 [submodule "modules/tracy"]
 	path = modules/tracy
 	url = https://github.com/BlueJayEngine/tracy.git
+[submodule "engine/Jay_Package"]
+	path = engine/Jay_Package
+	url = https://github.com/BlueJayEngine/Jay_Package.git
