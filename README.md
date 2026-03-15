@@ -1,4 +1,4 @@
-# Jay (BlueJay Engine)
+# Jay Engine
 
 A game/rendering engine written in the **Jai** programming language.
 
