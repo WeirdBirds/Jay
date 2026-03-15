@@ -12,8 +12,6 @@ Jay is a modular game engine built with Jai, featuring:
 
 ## Building
 
-Requires the Jai compiler (expected at `~/jai/`).
-
 ```bash
 # Debug build (X64 backend, bounds checking ON)
 jai build.jai
