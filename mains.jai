@@ -40,12 +40,12 @@ main :: () {
     context.logger = jay_logger;
 
     world: World(systems = .[
-            System(test_iter, xx Test_Stages.Q_ITER),
-            System(test_each, xx Test_Stages.Q_EACH),
-            System(test_random, xx Test_Stages.Q_RANDOM),
-            System(test_default, xx Test_Stages.DEFAULT),
-            System(test_bach, xx Test_Stages.BACH),
-            System(additional, xx Test_Stages.MAX) 
+        System(test_iter, xx Test_Stages.Q_ITER),
+        System(test_each, xx Test_Stages.Q_EACH),
+        System(test_random, xx Test_Stages.Q_RANDOM),
+        System(test_default, xx Test_Stages.DEFAULT),
+        System(test_bach, xx Test_Stages.BACH),
+        System(additional, xx Test_Stages.MAX) 
     ]);
 
     for 0..SOME_COUNT {
@@ -58,17 +58,14 @@ main :: () {
         array_add(*components, Component4.{ .{}, .{index = xx it} });
 
         // log("new_entity: %", components);
-
         n := it % 10;
 
         if n > 2 {
-            if n <= 6 {
+            if n <= 6
                 array_add(*components, Destruction1);
-            }
 
-            if n >= 4 {
+            if n >= 4
                 array_add(*components, Destruction2);
-            }
         }
 
         new_entity(world, components);
@@ -141,21 +138,17 @@ test_iter :: inline (query: Query(Component1, Component2, Component3, Component4
     iter3 := get_iter(query, Component3);
     iter4 := get_iter(query, Component4);
 
-    for *c1, index: iter1 {
+    for *c1, index: iter1
         c1.val1 += 1;
-    }
 
-    for *c2, index: iter2 {
+    for *c2, index: iter2
         c2.vala1 += 1;
-    }
 
-    for *c3, index: iter3 {
+    for *c3, index: iter3
         c3.valb1 += 1;
-    }
 
-    for *c4, index: iter4 {
+    for *c4, index: iter4
         c4.valc2.index += 1;
-    }
 }
 
 
@@ -175,9 +168,8 @@ test_random :: inline (query: Query(Component1, Component2, Component3, Componen
 
 
 test_bach :: inline (e: []Entity, c1: []Component1, c2: []Component2, c3: []Component3, c4: []Component4) {
-    for e {
+    for e
         log("Entity % bach touched", it);
-    } 
     for 0..3 {
         // print("% ", it);
         c1[it].val1 += 1;
@@ -190,5 +182,4 @@ test_bach :: inline (e: []Entity, c1: []Component1, c2: []Component2, c3: []Comp
 Destruction1 :: struct {v: s32;}
 Destruction2 :: struct {v: s64;}
 
-additional :: (d1: Destruction1, d2: Destruction2) {
-}
+additional :: (d1: Destruction1, d2: Destruction2) {}

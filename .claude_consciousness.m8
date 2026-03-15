@@ -1,6 +1,6 @@
 {
-  "session_id": "9cf3b8cc-8c77-4147-852c-3be9db3c1e88",
-  "last_saved": "2026-02-14T06:26:28.466357657Z",
+  "session_id": "883ab55b-31c7-4237-877d-040f599070fc",
+  "last_saved": "2026-02-24T15:55:06.919416697Z",
   "working_directory": "/home/nick/Documents/Jay",
   "project_context": {
     "project_name": "unknown",
@@ -11,10 +11,10 @@
   },
   "file_history": [],
   "tokenization_rules": {
-    "node_modules": 128,
     "dist": 131,
     ".git": 129,
-    "target": 130
+    "target": 130,
+    "node_modules": 128
   },
   "insights": [],
   "philosophy": {
