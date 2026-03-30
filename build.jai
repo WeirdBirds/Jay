@@ -32,10 +32,17 @@
 
     // For custom metaprograms, plugin arguments (+PluginName) are not in compile_time_command_line.
     // We need to use get_toplevel_command_line() and skip the first 2 args (compiler name and build script).
+    // Also strip "---" and everything after it — those are default-metaprogram directives
+    // (e.g. "--- import_dir <path>" from Jails) that parse_plugin_arguments would incorrectly
+    // treat as plugin options.
     toplevel_args := get_toplevel_command_line();
     if toplevel_args.count > 2 {
-        plugin_args := array_view(toplevel_args, 2, toplevel_args.count - 2);
-        success, plugins_to_create, args = parse_plugin_arguments(plugin_args);
+        filtered_args: [..]string;
+        for i: 2..toplevel_args.count - 1 {
+            if toplevel_args[i] == "---" break;
+            array_add(*filtered_args, toplevel_args[i]);
+        }
+        success, plugins_to_create, args = parse_plugin_arguments(filtered_args);
     } else {
         success, plugins_to_create, args = parse_plugin_arguments(args);
     }
@@ -47,24 +54,39 @@
 
 
 
-    // Process build script arguments
-    for arg: args {
-        if arg == "release" || arg == "-release" {
-            build_options.backend = .LLVM;
-            set_optimization(*build_options, Optimization_Type.OPTIMIZED_VERY_SMALL, false);
-        }
-        else if arg == "debug" || arg == "-release_debug" {
-            // LLVM backend with maximum optimization but keeping debug symbols
-            build_options.backend = .LLVM;
-            build_options.llvm_options.disable_inlining = true;
-            set_optimization(*build_options, Optimization_Type.OPTIMIZED_VERY_SMALL, true);
-        }
-        else if arg == "-" {
-            // Separator between plugin args and build args - skip
-            continue;
-        }
-        else {
-            log("Unknown build argument: '%'", arg);
+    // Process build script arguments.
+    // Remaining args from parse_plugin_arguments may include compiler flags
+    // passed by Jails (e.g. -quiet, -no_color, -x64, -import_dir) — skip those.
+    {
+        i := 0;
+        while i < args.count {
+            defer i += 1;
+            arg := args[i];
+
+            if arg == {
+                case "release"; #through;
+                case "-release";
+                    build_options.backend = .LLVM;
+                    set_optimization(*build_options, Optimization_Type.OPTIMIZED_VERY_SMALL, false);
+                case "debug"; #through;
+                case "-release_debug";
+                    build_options.backend = .LLVM;
+                    build_options.llvm_options.disable_inlining = true;
+                    set_optimization(*build_options, Optimization_Type.OPTIMIZED_VERY_SMALL, true);
+                case "-";
+                    continue;
+                case "-quiet"; #through;
+                case "-no_color"; #through;
+                case "-x64";
+                    // Compiler flags passed through by Jails — ignore
+                    continue;
+                case "-import_dir";
+                    // Compiler flag with argument — skip both
+                    i += 1;
+                    continue;
+                case;
+                    log("Unknown build argument: '%'", arg);
+            }
         }
     }
 

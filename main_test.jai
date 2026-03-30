@@ -80,6 +80,11 @@ main :: () {
             progress(*world, 0.1, Test_Stages.DEFAULT);
             log("DEFAULT: % μs", to_microseconds(current_time_consensus() - start));
         }
+        {
+            start := current_time_consensus();
+            progress(*world, 0.1, Test_Stages.DEFAULT);
+            log("DEFAULT: % μs", to_microseconds(current_time_consensus() - start));
+        }
 
         {
             start := current_time_consensus();
