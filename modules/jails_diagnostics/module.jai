@@ -1,0 +1,1 @@
+/home/nick/.config/nvim/external/Jails/bin/metaprogram/jails_diagnostics.jai

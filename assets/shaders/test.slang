@@ -27,6 +27,7 @@ struct Globals {
     float time;
     float _padding0;
     float4 camera_pos;
+    float4 world_data;
 };
 
 struct Object_Data {
@@ -50,16 +51,23 @@ struct AxisSubdivision {
     float total_segments;
 };
 
-static const float WORLD_TEXTURE_REPEAT_UNITS = 1.0;
-static const float WORLD_TEXTURE_SCALE = 1.0 / WORLD_TEXTURE_REPEAT_UNITS;
-static const int WORLD_GRID_SIZE = 4096;
-static const int WORLD_GRID_HEIGHT = 512;
-static const float WORLD_HALF = 0.5 * float(WORLD_GRID_SIZE);
-static const float WORLD_HEIGHT_F = float(WORLD_GRID_HEIGHT);
-static const float2 WALL_GRID_EXTENT = float2(float(WORLD_GRID_SIZE), float(WORLD_GRID_HEIGHT));
-static const float2 FLOOR_GRID_EXTENT = float2(float(WORLD_GRID_SIZE), float(WORLD_GRID_SIZE));
 static const float LOCAL_TESS_RADIUS = 1;
 static const float EPSILON = 1e-5;
+
+float world_grid_size()
+{
+    return globals.world_data.x;
+}
+
+float world_grid_height()
+{
+    return globals.world_data.y;
+}
+
+float world_half()
+{
+    return globals.world_data.z;
+}
 
 int clamp_voxel_axis(int value, int limit)
 {
@@ -180,20 +188,20 @@ HullConstants patch_constants(InputPatch<ControlPoint, 4> patch)
     if (abs(plane_normal.x) > 0.5)
     {
         enable_fine_grid = abs(patch[0].position.x - camera_pos.x) <= LOCAL_TESS_RADIUS;
-        axis0 = make_axis_subdivision(camera_pos.y, -WORLD_HALF, WORLD_HALF, enable_fine_grid);
-        axis1 = make_axis_subdivision(camera_pos.z, 0.0, WORLD_HEIGHT_F, enable_fine_grid);
+        axis0 = make_axis_subdivision(camera_pos.y, -world_half(), world_half(), enable_fine_grid);
+        axis1 = make_axis_subdivision(camera_pos.z, 0.0, world_grid_height(), enable_fine_grid);
     }
     else if (abs(plane_normal.y) > 0.5)
     {
         enable_fine_grid = abs(patch[0].position.y - camera_pos.y) <= LOCAL_TESS_RADIUS;
-        axis0 = make_axis_subdivision(camera_pos.x, -WORLD_HALF, WORLD_HALF, enable_fine_grid);
-        axis1 = make_axis_subdivision(camera_pos.z, 0.0, WORLD_HEIGHT_F, enable_fine_grid);
+        axis0 = make_axis_subdivision(camera_pos.x, -world_half(), world_half(), enable_fine_grid);
+        axis1 = make_axis_subdivision(camera_pos.z, 0.0, world_grid_height(), enable_fine_grid);
     }
     else
     {
         enable_fine_grid = abs(patch[0].position.z - camera_pos.z) <= LOCAL_TESS_RADIUS;
-        axis0 = make_axis_subdivision(camera_pos.x, -WORLD_HALF, WORLD_HALF, enable_fine_grid);
-        axis1 = make_axis_subdivision(camera_pos.y, -WORLD_HALF, WORLD_HALF, enable_fine_grid);
+        axis0 = make_axis_subdivision(camera_pos.x, -world_half(), world_half(), enable_fine_grid);
+        axis1 = make_axis_subdivision(camera_pos.y, -world_half(), world_half(), enable_fine_grid);
     }
 
     result.tess_outer[0] = axis1.total_segments;
@@ -235,20 +243,20 @@ PixelInput domain_main(HullConstants patch_data,
     if (abs(plane_normal.x) > 0.5)
     {
         enable_fine_grid = abs(patch[0].position.x - camera_pos.x) <= LOCAL_TESS_RADIUS;
-        axis0_subdivision = make_axis_subdivision(camera_pos.y, -WORLD_HALF, WORLD_HALF, enable_fine_grid);
-        axis1_subdivision = make_axis_subdivision(camera_pos.z, 0.0, WORLD_HEIGHT_F, enable_fine_grid);
+        axis0_subdivision = make_axis_subdivision(camera_pos.y, -world_half(), world_half(), enable_fine_grid);
+        axis1_subdivision = make_axis_subdivision(camera_pos.z, 0.0, world_grid_height(), enable_fine_grid);
     }
     else if (abs(plane_normal.y) > 0.5)
     {
         enable_fine_grid = abs(patch[0].position.y - camera_pos.y) <= LOCAL_TESS_RADIUS;
-        axis0_subdivision = make_axis_subdivision(camera_pos.x, -WORLD_HALF, WORLD_HALF, enable_fine_grid);
-        axis1_subdivision = make_axis_subdivision(camera_pos.z, 0.0, WORLD_HEIGHT_F, enable_fine_grid);
+        axis0_subdivision = make_axis_subdivision(camera_pos.x, -world_half(), world_half(), enable_fine_grid);
+        axis1_subdivision = make_axis_subdivision(camera_pos.z, 0.0, world_grid_height(), enable_fine_grid);
     }
     else
     {
         enable_fine_grid = abs(patch[0].position.z - camera_pos.z) <= LOCAL_TESS_RADIUS;
-        axis0_subdivision = make_axis_subdivision(camera_pos.x, -WORLD_HALF, WORLD_HALF, enable_fine_grid);
-        axis1_subdivision = make_axis_subdivision(camera_pos.y, -WORLD_HALF, WORLD_HALF, enable_fine_grid);
+        axis0_subdivision = make_axis_subdivision(camera_pos.x, -world_half(), world_half(), enable_fine_grid);
+        axis1_subdivision = make_axis_subdivision(camera_pos.y, -world_half(), world_half(), enable_fine_grid);
     }
 
     float4 axis0_world = float4(axis0_subdivision.world_min, axis0_subdivision.fine_min, axis0_subdivision.fine_max, axis0_subdivision.world_max);
@@ -267,21 +275,21 @@ PixelInput domain_main(HullConstants patch_data,
         world_pos = float3(patch[0].position.x, axis0, axis1);
         world_pos.y = snap_to_grid(world_pos.y);
         world_pos.z = snap_to_grid(world_pos.z);
-        plane_uv = float2((world_pos.y + WORLD_HALF) / float(WORLD_GRID_SIZE), world_pos.z / WORLD_HEIGHT_F);
+        plane_uv = float2((world_pos.y + world_half()) / world_grid_size(), world_pos.z / world_grid_height());
     }
     else if (abs(plane_normal.y) > 0.5)
     {
         world_pos = float3(axis0, patch[0].position.y, axis1);
         world_pos.x = snap_to_grid(world_pos.x);
         world_pos.z = snap_to_grid(world_pos.z);
-        plane_uv = float2((world_pos.x + WORLD_HALF) / float(WORLD_GRID_SIZE), world_pos.z / WORLD_HEIGHT_F);
+        plane_uv = float2((world_pos.x + world_half()) / world_grid_size(), world_pos.z / world_grid_height());
     }
     else
     {
         world_pos = float3(axis0, axis1, patch[0].position.z);
         world_pos.x = snap_to_grid(world_pos.x);
         world_pos.y = snap_to_grid(world_pos.y);
-        plane_uv = float2((world_pos.x + WORLD_HALF) / float(WORLD_GRID_SIZE), (world_pos.y + WORLD_HALF) / float(WORLD_GRID_SIZE));
+        plane_uv = float2((world_pos.x + world_half()) / world_grid_size(), (world_pos.y + world_half()) / world_grid_size());
     }
 
     output.sv_position = mul(globals.proj, mul(globals.view, float4(world_pos, 1.0)));
