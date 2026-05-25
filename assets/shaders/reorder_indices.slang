@@ -17,18 +17,10 @@ struct PopulatePush {
     float4 camera_up;
 };
 
-struct DrawIndexedIndirectCommand {
-    uint indexCount;
-    uint instanceCount;
-    uint firstIndex;
-    int  vertexOffset;
-    uint firstInstance;
-};
-
 [[vk::push_constant]] PopulatePush push;
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> bucket_counts;
 [[vk::binding(2, 0)]] RWStructuredBuffer<uint> bucket_heads;
-[[vk::binding(3, 0)]] RWStructuredBuffer<DrawIndexedIndirectCommand> indirect_commands;
+[[vk::binding(3, 0)]] RWStructuredBuffer<uint> sorted_indices;
 
 static const uint MODE_CLEAR   = 0;
 static const uint MODE_COUNT   = 1;
@@ -75,33 +67,6 @@ float side_limit_y(float z) {
     return max(z, push.near_plane) * push.tan_half_fov_v;
 }
 
-bool quad_visible(float3 p0, float3 p1, float3 p2, float3 p3) {
-    float3 v0 = to_view(p0);
-    float3 v1 = to_view(p1);
-    float3 v2 = to_view(p2);
-    float3 v3 = to_view(p3);
-
-    if (v0.z < push.near_plane && v1.z < push.near_plane &&
-        v2.z < push.near_plane && v3.z < push.near_plane) return false;
-
-    if (v0.z > push.far_plane && v1.z > push.far_plane &&
-        v2.z > push.far_plane && v3.z > push.far_plane) return false;
-
-    if (v0.x < -side_limit_x(v0.z) && v1.x < -side_limit_x(v1.z) &&
-        v2.x < -side_limit_x(v2.z) && v3.x < -side_limit_x(v3.z)) return false;
-
-    if (v0.x > side_limit_x(v0.z) && v1.x > side_limit_x(v1.z) &&
-        v2.x > side_limit_x(v2.z) && v3.x > side_limit_x(v3.z)) return false;
-
-    if (v0.y < -side_limit_y(v0.z) && v1.y < -side_limit_y(v1.z) &&
-        v2.y < -side_limit_y(v2.z) && v3.y < -side_limit_y(v3.z)) return false;
-
-    if (v0.y > side_limit_y(v0.z) && v1.y > side_limit_y(v1.z) &&
-        v2.y > side_limit_y(v2.z) && v3.y > side_limit_y(v3.z)) return false;
-
-    return true;
-}
-
 float plane_depth(uint plane_id) {
     float3 center;
     uint x_count = x_plane_count();
@@ -122,43 +87,6 @@ float plane_depth(uint plane_id) {
     return dot(center - push.camera_pos.xyz, push.camera_forward.xyz);
 }
 
-bool plane_visible(uint plane_id, out float depth) {
-    uint x_count = x_plane_count();
-    uint y_count = y_plane_count();
-    float half_x = half_world_x();
-    float half_y = half_world_y();
-    float height = world_height();
-
-    depth = plane_depth(plane_id);
-
-    if (plane_id < x_count) {
-        float x = float(plane_id) - half_x;
-        return quad_visible(
-            float3(x, -half_y, 0.0),
-            float3(x, -half_y, height),
-            float3(x,  half_y, height),
-            float3(x,  half_y, 0.0));
-    }
-
-    if (plane_id < x_count + y_count) {
-        uint y_plane = plane_id - x_count;
-        float y = float(y_plane) - half_y;
-        return quad_visible(
-            float3(-half_x, y, 0.0),
-            float3(-half_x, y, height),
-            float3( half_x, y, height),
-            float3( half_x, y, 0.0));
-    }
-
-    uint z_plane = plane_id - x_count - y_count;
-    float z = float(z_plane);
-    return quad_visible(
-        float3(-half_x, -half_y, z),
-        float3(-half_x,  half_y, z),
-        float3( half_x,  half_y, z),
-        float3( half_x, -half_y, z));
-}
-
 uint depth_bucket(float depth) {
     float span = max(push.far_plane - push.near_plane, 0.0001);
     float t = saturate((depth - push.near_plane) / span);
@@ -166,16 +94,25 @@ uint depth_bucket(float depth) {
     return min(bucket, push.bucket_count - 1);
 }
 
-uint first_index_for_plane(uint plane_id) {
-    return plane_id * push.plane_index_count;
+uint first_vertex_for_plane(uint plane_id) {
+    return plane_id * 4;
 }
 
-void clear_command(uint command_id) {
-    indirect_commands[command_id].indexCount = 0;
-    indirect_commands[command_id].instanceCount = 0;
-    indirect_commands[command_id].firstIndex = 0;
-    indirect_commands[command_id].vertexOffset = 0;
-    indirect_commands[command_id].firstInstance = 0;
+void clear_sorted_indices(uint plane_id) {
+    uint base = plane_id * push.plane_index_count;
+    [unroll]
+    for (uint i = 0; i < 4; ++i) {
+        sorted_indices[base + i] = 0;
+    }
+}
+
+void write_sorted_indices(uint dst_plane, uint src_plane) {
+    uint dst_base = dst_plane * push.plane_index_count;
+    uint src_base = first_vertex_for_plane(src_plane);
+    sorted_indices[dst_base + 0] = src_base + 0;
+    sorted_indices[dst_base + 1] = src_base + 1;
+    sorted_indices[dst_base + 2] = src_base + 2;
+    sorted_indices[dst_base + 3] = src_base + 3;
 }
 
 [shader("compute")]
@@ -190,7 +127,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
         }
 
         if (id < push.total_planes)
-            clear_command(id);
+            clear_sorted_indices(id);
 
         return;
     }
@@ -208,10 +145,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
 
     if (id >= push.total_planes) return;
 
-    float depth;
-    if (!plane_visible(id, depth)) return;
-
-    uint bucket = depth_bucket(depth);
+    uint bucket = depth_bucket(plane_depth(id));
 
     if (push.mode == MODE_COUNT) {
         InterlockedAdd(bucket_counts[bucket], 1);
@@ -219,13 +153,8 @@ void main(uint3 tid : SV_DispatchThreadID) {
     }
 
     if (push.mode == MODE_SCATTER) {
-        uint dst;
-        InterlockedAdd(bucket_heads[bucket], 1, dst);
-
-        indirect_commands[dst].indexCount = push.plane_index_count;
-        indirect_commands[dst].instanceCount = 1;
-        indirect_commands[dst].firstIndex = first_index_for_plane(id);
-        indirect_commands[dst].vertexOffset = 0;
-        indirect_commands[dst].firstInstance = 0;
+        uint dst_plane;
+        InterlockedAdd(bucket_heads[bucket], 1, dst_plane);
+        write_sorted_indices(dst_plane, id);
     }
 }
