@@ -1,0 +1,24 @@
+#include "../common.slang"
+
+[[vk::push_constant]]
+Compute_Data< Draw_Params> p;
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void main(uint3 dispatch_id : SV_DispatchThreadID) {
+
+    Draw_Params* params = p.get();
+
+    uint index = dispatch_id.x;
+
+    if (index < params.group_count) {
+        params.group_counts[index] = 0;
+        params.group_offsets[index] = 0;
+        params.group_write_cursor[index] = 0;
+    }
+
+    if (index == 0) {
+        params.total_visible[0] = 0;
+        params.draw_count[0] = 0;
+    }
+}

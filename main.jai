@@ -1,12 +1,11 @@
 #import "Basic"()(MEMORY_DEBUGGER = true);
 #import "Jay_Render";
 #import "Jay_Core";
-// #import "Jay_Logger";
+#import "Jay_ECS";
+
 
 main :: () {
-
-    engine: Engine(Packages(Jay_Render, Jay_Logger_CLI));
-
+    engine: Engine(Packages(Jay_Render));
     run(*engine);
     report_memory_leaks();
 }

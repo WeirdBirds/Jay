@@ -1,7 +1,7 @@
 #import "Basic"()(MEMORY_DEBUGGER = true);
 #import "Jay_ECS";
 #import "Jay_Logger";
-#import "Jay_Render";
+#import "Jay_SRender";
 
 Component1 :: struct {
     val1: s32;
@@ -23,7 +23,7 @@ Component4 :: struct {
     valc2: Entity;
 }
 
-Test_Stages: enum_flags u64 {
+Test_Stages :: enum_flags u64 {
     Q_ITER;
     Q_EACH;
     Q_RANDOM;
@@ -162,7 +162,7 @@ test_random :: inline (query: Query(Component1, Component2, Component3, Componen
         c1 := get(it, Component1);
         c2 := get(it, Component2);
         c3 := get(it, Component3);
-        c4 := get(it, Component4);
+        c4: Component4 = get(it, Component4);
 
         c1.val1 += 1;
         c2.vala1 += 1;
