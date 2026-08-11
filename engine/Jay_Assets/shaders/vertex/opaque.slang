@@ -5,7 +5,6 @@ Vertex_Output main(uint vertex_id : SV_VulkanVertexID, uint instance_id : SV_Vul
     Vertex_Params* params = vp.get();
 
     uint visible_instance = params.visible_instances[instance_id];
-    Mesh_Instance instance = params.instances[visible_instance];
     Vertex vertex = params.vertices[vertex_id];
     float4x4 transform = params.transforms[visible_instance];
 
@@ -14,6 +13,6 @@ Vertex_Output main(uint vertex_id : SV_VulkanVertexID, uint instance_id : SV_Vul
     output.normal = vertex.normal;
     output.color = vertex.color;
     output.uv = vertex.uv;
-    output.material_id = instance.material_id;
+    output.instance_id = visible_instance;
     return output;
 }

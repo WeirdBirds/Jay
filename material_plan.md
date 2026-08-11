@@ -9,7 +9,7 @@ Goal: make user-defined materials pleasant from Jai and Slang while keeping Jay_
 - Slang reflection is source of truth for generated material schema.
 - Generated Jai structs are material recipe structs, not byte-for-byte GPU layout mirrors.
 - Material data must work with GPU-driven / indirect drawing.
-- No per-material descriptor binding path. Material selection happens through `material_id` and global GPU tables.
+- No per-material descriptor binding path. Material selection happens through a per-instance `Material*` GPU pointer into the material constants heap.
 - Engine-owned vertex/fragment/global params remain separate and are not part of this material API.
 
 ## Non-goals
@@ -54,8 +54,8 @@ material: PBR_Material = .{
     },
 };
 
-material_id := upload_material(material);
-spawn_mesh(mesh, transform, material_id);
+material_ptr := upload_material(material);
+spawn_mesh(mesh, transform, material_ptr);
 ```
 
 Generated material values are recipes/descriptors. They contain scalar params and asset `Name`s. They do not contain renderer handles, hidden runtime state, GPU pointers, or ownership. After `upload_material` returns, the Jai material value may be freed.
@@ -96,7 +96,7 @@ The `Jay::` primitives are not new GPU objects. They are semantic front-end type
 ## Material primitive list
 
 | Primitive | Generated Jai field | GPU representation | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `Jay::Params<T>` | `T` | pointer/offset into material constants heap | Small fixed material constants |
 | `Jay::Array<T>` | `[]T` | pointer/offset + count | Variable per-material data |
 | `Jay::Ref<T>` | `Name` | pointer/index to shared uploaded blob | Large/shared material asset |
@@ -286,7 +286,7 @@ Material_Type :: struct {
 
 Uploaded_Material :: struct {
     type_id: u32;
-    material_id: u32;        // index into GPU MaterialData[]
+    material_ptr: Gpu_Ptr;   // GPU pointer to packed constants in the material constants heap
     item_hash: u64;          // canonical material recipe hash
 
     constants_allocation: Gpu_Allocation;
@@ -327,17 +327,48 @@ If an identical uploaded item already exists, renderer increments its metadata `
 
 Because hash collisions are theoretically possible, debug builds may keep enough canonical payload data to verify equality after hash match.
 
-GPU-visible material table:
+GPU-visible material model:
+
+Materials are packed constant blobs allocated in the material constants heap. Each instance holds a direct GPU pointer to its material blob — no indirection through a global material table:
 
 ```jai
-MaterialData :: struct {
-    material_type_id: u32;
+// V1 packed material (matches slang `Material` in common.slang, 28 bytes)
+Material :: struct {
+    base_color:    Vec4;
+    texture_index: u32;
+    sampler_index: u32;
+    flags:         u32;
+}
+```
 
-    constants_ptr: Gpu_Ptr;      // or offset, renderer choice
-    constants_size: u32;
+```slang
+struct Material {
+    float4 base_color;
+    uint texture_index;
+    uint sampler_index;
+    uint flags;
+}
 
-    resource_base: u32;          // index into material resource table
-    resource_count: u32;
+struct Mesh_Instance {
+    uint mesh_id;
+    uint flags;
+    Material* material;   // Gpu_Ptr into the material constants heap
+}
+```
+
+Instance and draw-group records carry the pointer directly:
+
+```jai
+// renderer-owned state
+Draw_Group {
+    mesh_id:  u32;
+    material: Gpu_Ptr;
+}
+
+Mesh_Instance {
+    mesh_id:  u32;
+    flags:    u32;
+    material: Gpu_Ptr;
 }
 ```
 
@@ -378,7 +409,7 @@ Upload path:
 item_hash := hash_material_recipe(recipe);
 if meta := table_find(*uploaded_metadata, item_hash) {
     meta.ref_count += 1;
-    return meta.id;
+    return meta.material_ptr;
 }
 
 // Resolve dependencies through same uploaded_metadata table.
@@ -387,10 +418,9 @@ if meta := table_find(*uploaded_metadata, item_hash) {
 ptr := alloc(material_constants_allocator, layout.constants_size);
 pack_material_constants(recipe, ptr, layout);
 
-materials_cpu[material_id].constants_ptr = to_gpu_ptr(material_constants_allocator, ptr);
-materials_cpu[material_id].constants_size = layout.constants_size;
+material_ptr := to_gpu_ptr(material_constants_allocator, ptr);
 
-table_add(*uploaded_metadata, item_hash, .{ id = material_id, ref_count = 1 });
+table_add(*uploaded_metadata, item_hash, .{ id = material_ptr, ref_count = 1 });
 ```
 
 Upload is not a deep copy of arbitrary CPU objects. It consumes a material recipe, resolves asset names, uploads missing dependencies, packs scalar params, and creates or reuses a GPU material record. The original recipe can be freed after `upload_material` returns.
@@ -398,7 +428,7 @@ Upload is not a deep copy of arbitrary CPU objects. It consumes a material recip
 Caveat: `Gpu_Heap` resize can move allocations. Material system must either:
 
 1. avoid resize for material constants, or
-2. update `MaterialData.constants_ptr` immediately after any move, or
+2. update `material_ptr` immediately after any move, or
 3. store offsets and update offsets after move.
 
 V1 recommendation: no resize for material constants. Uploaded materials are immutable records. To change material values, upload a new recipe and switch instances to the returned `Material_Id`; release the old id when no longer used.
@@ -430,22 +460,21 @@ When `release_material(id)` reaches zero:
 1. remove `item_hash -> id` from `uploaded_metadata`;
 2. release texture/sampler dependencies by decrementing their `uploaded_metadata` refcounts;
 3. enqueue constants/array/resource-table allocations for deferred free after `FRAME_COUNT` frames;
-4. recycle `MaterialData` slot after safe.
+4. free the constants allocation when safe.
 
 If two equal recipes are uploaded, both calls return the same `Material_Id` and increment the same refcount. Equality is based on the canonical material item hash, not pointer identity.
 
 ## Indirect draw integration
 
-Indirect draw does not choose shaders. Command recording still binds one pipeline at a time. Material system participates through grouping and `material_id`.
+Indirect draw does not choose shaders. Command recording still binds one pipeline at a time. Material system participates through grouping; the instance carries a direct `Material*` pointer.
 
 Per instance:
 
 ```jai
-InstanceData :: struct {
-    transform_id: u32;
-    mesh_id: u32;
-    material_id: u32;
-    // existing fields...
+Mesh_Instance :: struct {
+    mesh_id:  u32;
+    flags:    u32;
+    material: Gpu_Ptr;   // *Material into the material constants heap
 }
 ```
 
@@ -455,7 +484,7 @@ GPU grouping key should include pipeline/material type, not material instance va
 group_key = pipeline_id + mesh_id + material_type_id
 ```
 
-Material instance values differ through `material_id`, so many materials can share one pipeline group.
+Material instance values differ through the `material` pointer, so many materials can share one pipeline group.
 
 Frame command recording:
 
@@ -474,30 +503,34 @@ for group in draw_groups {
 }
 ```
 
-Shader access path:
+Shader access path (current V1 implementation):
 
 ```slang
-uint visible_index = firstInstance + instance_id;
-InstanceData inst = instances[visible_instances[visible_index]];
-uint material_id = inst.material_id;
-MaterialData mat = materials[material_id];
+uint visible_instance = params.visible_instances[instance_id];
+Mesh_Instance inst = params.instances[visible_instance];
+Material mat = *inst.material;
 ```
 
-Vertex shader passes material id to fragment stage if needed:
+Vertex shader passes the culled instance id (not the raw draw instance id — it indexes `visible_instances`) to the fragment stage as a flat varying:
 
 ```slang
 struct VS_Out {
     float4 position : SV_Position;
-    nointerpolation uint material_id : MATERIAL_ID;
+    uint instance_id : TEXCOORD1;   // flat (auto-decorated for uint varyings)
 };
 ```
+
+Fragment shader loads the material through the per-instance pointer:
 
 Fragment shader loads material data:
 
 ```slang
-PBR_Params pbr = load_PBR_Params(materials[input.material_id].constants_ptr);
-Texture2D albedo = get_material_texture_2d(input.material_id, PBR_ALBEDO_SLOT);
+Fragment_Params* params = fp.get();
+Mesh_Instance inst = params.instances[input.instance_id];
+Material mat = *inst.material;
 ```
+
+Packed constants beyond V1's `Material` (e.g. `Jay::Params<T>`) live at the same pointer; resource slots resolve through the material resource table using `mat.texture_index`/`mat.sampler_index` or future table pointers.
 
 User-facing wrapper should hide this behind generated helpers where possible:
 
@@ -513,9 +546,9 @@ Because `Jay::` primitives are semantic wrappers, they need shader support code.
 V1 can use generated helper functions per material type:
 
 ```slang
-PBR_Params Jay_load_PBR_Params(uint material_id);
-Texture2D Jay_get_PBR_albedo(uint material_id);
-SamplerState Jay_get_PBR_sampler(uint material_id);
+PBR_Params Jay_load_PBR_Params(Material* mat);
+Texture2D Jay_get_PBR_albedo(Material* mat);
+SamplerState Jay_get_PBR_sampler(Material* mat);
 ```
 
 Wrapper methods can call these helpers if Slang generic/member support allows it. If method-based wrappers are awkward, V1 can use explicit functions:
@@ -538,14 +571,13 @@ Texture2D global_textures_2d[];
 TextureCube global_textures_cube[];
 SamplerState global_samplers[];
 StructuredBuffer<MaterialResource> material_resources;
-StructuredBuffer<MaterialData> materials;
 ```
 
-Material resource slot lookup:
+Material lookup is direct — the instance holds `Material*` (no `materials[]` table):
 
 ```slang
-MaterialData mat = materials[material_id];
-MaterialResource res = material_resources[mat.resource_base + slot];
+Material* mat_ptr = inst.material;
+MaterialResource res = material_resources[mat_ptr->texture_index];
 Texture2D tex = global_textures_2d[res.index];
 ```
 
@@ -628,9 +660,9 @@ Use Jay::Texture2D_Array for arrays of textures.
 ### Stage 3: Runtime material upload
 
 - Add `Material_Type` registry.
-- Add `Uploaded_Material` / `MaterialData[]` management.
+- Add `Uploaded_Material` management (keyed by `material_ptr`).
 - Add shared `uploaded_metadata: Table<u64, Uploaded_Metadata>` for all uploadable assets.
-- Add material constants `Gpu_Heap`.
+- Add material constants `Gpu_Heap` (already present: `Render_Data.material_allocator`).
 - Add material resource table.
 - Implement `upload_material` and `release_material`.
 
@@ -638,14 +670,14 @@ Use Jay::Texture2D_Array for arrays of textures.
 
 - Add `jay_material.slang` with `Jay::` primitive declarations.
 - Add generated or generic load/sample helpers.
-- Connect helpers to existing SGPU buffers: instances, materials, resource tables, global texture/sampler arrays.
+- Connect helpers to existing SGPU buffers: instances, material pointers, resource tables, global texture/sampler arrays.
 
 ### Stage 5: Indirect draw integration
 
-- Add `material_id` to `InstanceData` if not already present.
+- `Mesh_Instance` carries `material: Gpu_Ptr` (done in the current implementation).
 - Include `pipeline_id`/`material_type_id` in draw group construction.
 - Bind pipeline per group.
-- Pass material id from vertex to fragment.
+- Pass culled instance id from vertex to fragment; fragment dereferences `instances[id].material`.
 - Validate many material instances can draw under one pipeline group.
 
 ### Stage 6: More primitives
@@ -662,7 +694,7 @@ Use Jay::Texture2D_Array for arrays of textures.
 - Whether public shader usage can be method-style (`pbr.get()`) or function-style (`Jay::get(pbr)`).
 - Whether generated Jai structs are emitted into source files or injected through `#insert` at compile time.
 - Whether Slang reflection is produced by CLI JSON, C API binding, or a custom handler wrapper.
-- Whether `MaterialData` stores `Gpu_Ptr` or offsets. User API unaffected.
+- Whether material records expose `Gpu_Ptr` directly or hide it behind a handle. User API unaffected.
 
 ## Recommended defaults
 
@@ -671,6 +703,6 @@ Use Jay::Texture2D_Array for arrays of textures.
 - Use generated Jai recipe structs, never byte-identical GPU mirrors.
 - Use reflected offsets for packing.
 - Use `Gpu_Heap` for material constants.
-- Store `material_id` per instance.
+- Store `Material*` (`Gpu_Ptr`) per instance, pointing into the material constants heap.
 - Group indirect draws by pipeline/material type/mesh, not by material instance.
 - Keep resource arrays explicit (`Jay::Texture2D_Array`) instead of nesting resources in `Jay::Array<T>`.

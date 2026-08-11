@@ -16,15 +16,21 @@ struct Fragment_Data<T> {
     [ForceInline] T* get() { return data; }
 };
 
+struct Material {
+    float4 base_color;
+    uint texture_index;
+    uint sampler_index;
+    uint flags;
+}
+
 struct Bounds {
     float4 center_radius; 
 }
 
 struct Mesh_Instance { 
     uint mesh_id;
-    uint material_id;
     uint flags;
-    uint padding0;
+    Material* material;
 }
 
 struct Mesh {     
@@ -33,16 +39,9 @@ struct Mesh {
     int  vertex_offset;
 }
 
-struct Material {
-    float4 base_color;
-    uint texture_index;
-    uint sampler_index;
-    uint flags;
-}
-
 struct Draw_Group {
     uint mesh_id;
-    uint material_id;
+    Material* material;
 }
 
 struct Draw_Indexed_Command { 
@@ -99,10 +98,10 @@ struct Vertex_Output {
     float3 normal     : NORMAL;
     float3 color      : COLOR0;
     float2 uv         : TEXCOORD0;
-    uint   material_id : TEXCOORD1;
+    uint   instance_id : TEXCOORD1;
 };
 
 struct Fragment_Params {
-    Material* materials;
+    Mesh_Instance* instances;
 }
 

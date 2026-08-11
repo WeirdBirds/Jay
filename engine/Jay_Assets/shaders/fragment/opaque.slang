@@ -3,7 +3,8 @@
 [shader("fragment")]
 float4 main(Vertex_Output input) : SV_Target0 {
     Fragment_Params* params = fp.get();
-    Material mat = params.materials[input.material_id];
+    Mesh_Instance instance = params.instances[input.instance_id];
+    Material mat = *instance.material;
 
     float3 N = normalize(input.normal);
     float3 L = normalize(float3(0.5, -0.5, 1.0));
