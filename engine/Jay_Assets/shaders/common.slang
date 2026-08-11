@@ -20,32 +20,32 @@ struct Bounds {
     float4 center_radius; 
 }
 
-struct Mesh_Instance {    // primitives/mesh.jai
+struct Mesh_Instance { 
     uint mesh_id;
     uint material_id;
     uint flags;
     uint padding0;
 }
 
-struct Mesh {         // primitives/mesh.jai
+struct Mesh {     
     uint first_index;
     uint index_count;
     int  vertex_offset;
 }
 
-struct Material {     // primitives/material.jai
+struct Material {
     float4 base_color;
     uint texture_index;
     uint sampler_index;
     uint flags;
 }
 
-struct Draw_Group {       // primitives/draw.jai
+struct Draw_Group {
     uint mesh_id;
     uint material_id;
 }
 
-struct Draw_Indexed_Command { // primitives/draw.jai
+struct Draw_Indexed_Command { 
     uint index_count;
     uint instance_count;
     uint first_index;
@@ -65,7 +65,6 @@ struct Draw_Params {
     float4x4* transforms;
     Bounds* bounds;
     Mesh* meshes;
-    Material* materials;
     Draw_Group* groups;
     uint* instance_group_static;
 

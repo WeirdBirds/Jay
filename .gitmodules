@@ -36,4 +36,4 @@
 	url = https://github.com/BlueJayEngine/Jay_Package.git
 [submodule "engine/sgpu"]
 	path = engine/sgpu
-	url = https://github.com/roeyb1/sgpu.git
+	url = https://github.com/NickTsaizer/sgpu.git

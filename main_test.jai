@@ -28,7 +28,7 @@ Test_Stages :: enum_flags u64 {
     Q_EACH;
     Q_RANDOM;
     DEFAULT;
-    BACH;
+    BATCH;
     MAX;
 }
 
@@ -174,7 +174,7 @@ test_random :: inline (query: Query(Component1, Component2, Component3, Componen
 
 test_bach :: inline (e: []Entity, c1: []Component1, c2: []Component2, c3: []Component3, c4: []Component4) {
     for e
-        log("Entity % bach touched", it);
+        log("Entity % batch touched", it); 
     for 0..3 {
         // print("% ", it);
         c1[it].val1 += 1;
