@@ -1,7 +1,4 @@
-#include "../common.slang"
-
-[[vk::push_constant]]
-Fragment_Data<Fragment_Params> fp;
+#include "../jay_api.slang"
 
 [shader("fragment")]
 float4 main(Vertex_Output input) : SV_Target0 {

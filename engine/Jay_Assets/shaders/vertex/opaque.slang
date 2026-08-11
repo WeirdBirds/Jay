@@ -1,7 +1,4 @@
-#include "../common.slang"
-
-[[vk::push_constant]]
-Vertex_Data<Vertex_Params> vp;
+#include "../jay_api.slang"
 
 [shader("vertex")]
 Vertex_Output main(uint vertex_id : SV_VulkanVertexID, uint instance_id : SV_VulkanInstanceID) {

@@ -1,7 +1,4 @@
-#include "../common.slang"
-
-[[vk::push_constant]]
-Compute_Data< Draw_Params> p;
+#include "../jay_api.slang"
 
 [ForceInline]
 bool sphere_inside_frustum(float4 center_radius, float4 frustum_planes[6]) {

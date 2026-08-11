@@ -1,7 +1,4 @@
-#include "../common.slang"
-
-[[vk::push_constant]]
-Compute_Data< Draw_Params> p;
+#include "../jay_api.slang"
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
