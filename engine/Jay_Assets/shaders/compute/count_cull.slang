@@ -19,6 +19,11 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     uint instance_id = dispatch_id.x;
     if (instance_id >= params.instance_count) return;
 
+    if ((params.instances[instance_id].flags & 1u) != 0u) {
+        params.visible_flags[instance_id] = 0;
+        return;
+    }
+
     // Read bounds for this instance
     Bounds bounds = params.bounds[instance_id];
 

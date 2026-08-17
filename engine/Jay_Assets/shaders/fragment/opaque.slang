@@ -4,13 +4,13 @@
 float4 main(Vertex_Output input) : SV_Target0 {
     Fragment_Params* params = fp.get();
     Mesh_Instance instance = params.instances[input.instance_id];
-    Material mat = *instance.material;
+    Material mat = params.materials[instance.material_index];
 
     float3 N = normalize(input.normal);
     float3 L = normalize(float3(0.5, -0.5, 1.0));
     float ndotl = max(0.0, dot(N, L));
 
-    float lighting = 0.2 + 0.8 * ndotl;   // ← ambient 30% so never black
+    float lighting = 0.2 + 0.8 * ndotl;
 
     return float4(mat.base_color.rgb * lighting, mat.base_color.a);
 }

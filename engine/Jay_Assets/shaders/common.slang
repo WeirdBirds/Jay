@@ -21,16 +21,18 @@ struct Material {
     uint texture_index;
     uint sampler_index;
     uint flags;
+    uint padding;
 }
 
 struct Bounds {
     float4 center_radius; 
 }
 
-struct Mesh_Instance { 
+struct Mesh_Instance {
     uint mesh_id;
     uint flags;
-    Material* material;
+    uint material_index;
+    uint padding;
 }
 
 struct Mesh {     
@@ -41,7 +43,9 @@ struct Mesh {
 
 struct Draw_Group {
     uint mesh_id;
-    Material* material;
+    uint padding0;
+    uint padding1;
+    uint padding2;
 }
 
 struct Draw_Indexed_Command { 
@@ -103,5 +107,6 @@ struct Vertex_Output {
 
 struct Fragment_Params {
     Mesh_Instance* instances;
+    Material* materials;
 }
 
