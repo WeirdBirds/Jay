@@ -10,7 +10,7 @@ Vertex_Output main(uint vertex_id : SV_VulkanVertexID, uint instance_id : SV_Vul
 
     Vertex_Output output;
     output.position = mul(params.view_projection, mul(transform, float4(vertex.position, 1.0)));
-    output.normal = vertex.normal;
+    output.normal = normalize(mul((float3x3) transform, vertex.normal));
     output.color = vertex.color;
     output.uv = vertex.uv;
     output.instance_id = visible_instance;
