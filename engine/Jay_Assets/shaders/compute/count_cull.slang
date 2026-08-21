@@ -86,11 +86,9 @@ bool hiz_sphere_visible(Bounds b, Draw_Params* p) {
     float2 t_min = (min_ndc * 0.5 + 0.5) * base;
     float2 t_max = (max_ndc * 0.5 + 0.5) * base;
     float2 span = t_max - t_min;
-
     float lf = log2(max(span.x, span.y) / 4.0);
     uint level = lf > 0.0 ? uint(lf) + 1u : 0u;
     if (level >= p->hiz_levels) level = p->hiz_levels - 1u;
-
     float scale = exp2(float(level));
     float2 ls = base / scale;
     uint x0 = uint(max(t_min.x / scale, 0.0));
@@ -126,7 +124,34 @@ bool hiz_sphere_visible(Bounds b, Draw_Params* p) {
     // grid — never claim occlusion from an empty footprint.
     if (!any_covered) return true;
 
-    return best > strongest + p->hiz_epsilon;
+    bool hidden = best <= strongest + p->hiz_epsilon;
+    if (!hidden) return true;
+    // Second level (coarser) for conservatism: hidden only if both levels agree
+    if (level + 1 < p->hiz_levels) {
+        uint level2 = level + 1;
+        float scale2 = exp2(float(level2));
+        float2 ls2 = base / scale2;
+        uint x02 = uint(max(t_min.x / scale2, 0.0));
+        uint y02 = uint(max(t_min.y / scale2, 0.0));
+        uint x12 = uint(min(t_max.x / scale2, ls2.x - 1.0));
+        uint y12 = uint(min(t_max.y / scale2, ls2.y - 1.0));
+        float strongest2 = 1.0;
+        bool any2 = false;
+        for (uint y = y02; y <= y12; y++) {
+            for (uint x = x02; x <= x12; x++) {
+                float2 closest = clamp(c_l, float2(float(x), float(y)), float2(float(x)+1.0, float(y)+1.0));
+                float2 d2 = (closest - c_l) * r_inv;
+                if (dot(d2, d2) > 1.0) continue;
+                any2 = true;
+                float v = g_rw_textures_2d[p->hiz_view_indices[level2]][int2(int(x), int(y))];
+                strongest2 = min(strongest2, v);
+            }
+        }
+        if (!any2) return true;
+        hidden = best <= strongest2 + p->hiz_epsilon;
+        if (!hidden) return true;
+    }
+    return false;
 }
 
 [shader("compute")]
