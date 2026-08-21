@@ -18,4 +18,5 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
 
     uint dst = params.group_offsets[group_id] + slot;
     params.visible_instances[dst] = instance_id;
+    InterlockedAdd(params.counters[16u], 1u);   // debug: instances drawn by this chain
 }

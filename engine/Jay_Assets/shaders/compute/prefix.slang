@@ -18,4 +18,5 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     }
 
     params.total_visible[0] = sum;
+    params.counters[19u] = sum; // debug: total visible
 }

@@ -14,6 +14,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
 
     uint draw_index;
     InterlockedAdd(params.draw_count[0], 1, draw_index);
+    InterlockedAdd(params.counters[18u], 1u); // debug: draw commands emitted
 
     Draw_Group group = params.groups[group_id];
     Mesh mesh = params.meshes[group.mesh_id];

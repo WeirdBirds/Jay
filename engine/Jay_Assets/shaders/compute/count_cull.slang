@@ -1,4 +1,34 @@
+// count_cull.slang — two-pass depth-aware culling.
+//
+// Each instance carries a persistent occluded_flags bit. The two dispatch
+// chains run in the same frame:
+//
+//   Pass A (cull_mode 0) — frustum test, then the history prediction:
+//   instances whose last-frame rescue CONFIRMED occlusion (flag == 1) and
+//   whose camera motion is under the gate (history_enabled) are predicted
+//   occluded and skipped. Every reject here is only a PREDICTION — nothing
+//   is ever committed to the frame on the strength of it.
+//
+//   Pass B (cull_mode 1) — same-frame rescue. Every pass-A reject carries a
+//   flag, so pass B retests exactly that set against the fresh pyramid built
+//   from this frame's real depth (hiz_sphere_visible). Survivors are added
+//   back to the draw lists before the frame presents: no result reaches the
+//   screen unless the current-frame occlusion pyramid agrees.
+//
+// Counters (HiZ_Counters ring): [3] rejected_A (predicted), [4] rescued_B,
+// [5] confirmed_B, [6] history tests run. Conservation invariant:
+// rejected_A == rescued_B + confirmed_B.
+//
+// Reverse-Z, Z-up left-handed, depth test GREATER, conservative reduction
+// MIN: the pyramid tile value is the farthest occluder surface, so a tile can
+// never hide anything it does not actually cover.
+
 #include "../jay_api.slang"
+
+// Bindless heap (set 0 — matches sgpu bindless.jai):
+//   binding 1: storage images (element index = gpu_texture_view handle)
+[[vk::binding(1, 0)]]
+RWTexture2D<float> g_rw_textures_2d[];
 
 [ForceInline]
 bool sphere_inside_frustum(float4 center_radius, float4 frustum_planes[6]) {
@@ -10,37 +40,174 @@ bool sphere_inside_frustum(float4 center_radius, float4 frustum_planes[6]) {
     return true;
 }
 
+// Conservative same-frame pyramid test. The pyramid stores the tile MIN =
+// the farthest occluder surface in the tile (the strongest occluder). The
+// sphere can only be hidden when every pixel of its projection loses the
+// GREATER depth test: the strongest tile min across the sphere's screen AABB
+// beats the sphere's best possible depth (its nearest surface). Any other
+// outcome errs visible, which is the safe direction — a false-visible result
+// is corrected for free, a false-occluded one would pop geometry.
+[ForceInline]
+bool hiz_sphere_visible(Bounds b, Draw_Params* p) {
+    // View-space depth of the center: the view matrix rows are the basis
+    // vectors with forward along -Z (GL-style projection, w = -z), so the
+    // forward distance is the negated z. depth = revz(d) is depth-buffer
+    // value (near -> 1.0, far -> 0.0), and the depth test is GREATER.
+    float4 cv = mul(p->view, float4(b.center_radius.xyz, 1.0));
+    float d = -cv.z;
+    float r = b.center_radius.w;
+    if (d - r <= 0.0) return true;   // camera inside the sphere: always visible
+
+    // Reverse-Z depth of the sphere's nearest surface (its best case).
+    float best = p->ndc_coeffs.y / (d - r) - p->ndc_coeffs.x;
+
+    // Projected center in NDC.
+    float4 c_clip = mul(p->view_projection, float4(b.center_radius.xyz, 1.0));
+    float2 c_ndc = c_clip.xy / c_clip.w;
+
+    // NDC half-extent per axis: project the center displaced along that view
+    // axis by the radius. The view rows are the basis (row 0 = right,
+    // row 1 = up). The clip w stays at the center depth, so the NDC offset is
+    // exact for the sampled axis displacement.
+    float3 right = float3(p->view[0][0], p->view[0][1], p->view[0][2]);
+    float3 up    = float3(p->view[1][0], p->view[1][1], p->view[1][2]);
+    float4 c_r = mul(p->view_projection, float4(b.center_radius.xyz + right * r, 1.0));
+    float4 c_u = mul(p->view_projection, float4(b.center_radius.xyz + up * r, 1.0));
+    float2 r_ndc = float2(abs(c_r.x / c_r.w - c_ndc.x),
+                          abs(c_u.y / c_u.w - c_ndc.y));
+
+    float2 min_ndc = max(c_ndc - r_ndc, float2(-1.0, -1.0));
+    float2 max_ndc = min(c_ndc + r_ndc, float2(1.0, 1.0));
+    if (min_ndc.x >= max_ndc.x || min_ndc.y >= max_ndc.y) return true;
+
+    // NDC -> pyramid base texels, then to the level where the AABB fits in a
+    // ~4x4 block. A sub-texel AABB samples the single covering texel.
+    float2 base = p->hiz_base_size;
+    float2 t_min = (min_ndc * 0.5 + 0.5) * base;
+    float2 t_max = (max_ndc * 0.5 + 0.5) * base;
+    float2 span = t_max - t_min;
+
+    float lf = log2(max(span.x, span.y) / 4.0);
+    uint level = lf > 0.0 ? uint(lf) + 1u : 0u;
+    if (level >= p->hiz_levels) level = p->hiz_levels - 1u;
+
+    float scale = exp2(float(level));
+    float2 ls = base / scale;
+    uint x0 = uint(max(t_min.x / scale, 0.0));
+    uint y0 = uint(max(t_min.y / scale, 0.0));
+    uint x1 = uint(min(t_max.x / scale, ls.x - 1.0));
+    uint y1 = uint(min(t_max.y / scale, ls.y - 1.0));
+
+    // Sample only tiles whose centre lies inside the projected disk. The
+    // square AABB always includes the clear corners around the disk; taking
+    // their min (0.0 in reverse-Z = far) would make every test pass.
+    float2 c_l = (c_ndc * 0.5 + 0.5) * base / scale;   // disk centre in level tiles
+    float2 r_l = r_ndc * base / scale;                 // disk half-extent in level tiles
+    float2 r_inv = float2(1.0, 1.0) / max(r_l, float2(1e-4, 1e-4));
+
+    float strongest = 1.0;
+    bool any_covered = false;
+    for (uint y = y0; y <= y1; y++) {
+        for (uint x = x0; x <= x1; x++) {
+            float2 d2 = (float2(float(x) + 0.5, float(y) + 0.5) - c_l) * r_inv;
+            if (dot(d2, d2) > 1.0) continue;   // tile centre outside the disk
+            any_covered = true;
+            float v = g_rw_textures_2d[p->hiz_view_indices[level]][int2(int(x), int(y))];
+            strongest = min(strongest, v);
+        }
+    }
+
+    // No tile centre covered: the sphere projects smaller than the sampling
+    // grid — never claim occlusion from an empty footprint.
+    if (!any_covered) return true;
+
+    return best > strongest + p->hiz_epsilon;
+}
+
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void main(uint3 dispatch_id : SV_DispatchThreadID) {
-    
     Draw_Params* params = p.get();
 
     uint instance_id = dispatch_id.x;
-    if (instance_id >= params.instance_count) return;
+    if (instance_id >= params->instance_count) return;
 
-    if ((params.instances[instance_id].flags & 1u) != 0u) {
-        params.visible_flags[instance_id] = 0;
+    if ((params->instances[instance_id].flags & 1u) != 0u) {
+        params->visible_flags[instance_id] = 0u;
         return;
     }
 
-    // Read bounds for this instance
-    Bounds bounds = params.bounds[instance_id];
+    Bounds b = params->bounds[instance_id];
 
-    if (!sphere_inside_frustum(bounds.center_radius, params.frustum_planes)) {
-        params.visible_flags[instance_id] = 0;
+    if (params->cull_mode == 0u) {
+        // Pass A: frustum, then the history prediction against the pyramid as
+        // it stands (last frame's depth, since the rebuild happens after the
+        // render that follows this chain). A hidden sphere is a PREDICTION
+        // only — it is flagged so pass B re-tests it against the fresh
+        // pyramid before this frame presents.
+        if (params->first_frame != 0u) {
+            params->occluded_flags[instance_id] = 0u;
+        }
+
+        if (!sphere_inside_frustum(b.center_radius, params->frustum_planes)) {
+            params->occluded_flags[instance_id] = 0u;
+            params->visible_flags[instance_id] = 0u;
+            return;
+        }
+
+        if (params->history_enabled != 0u) {
+            InterlockedAdd(params->counters[6u], 1u);   // history test run
+            if (!hiz_sphere_visible(b, params)) {
+                // Predicted occluded — pass B retests against the fresh
+                // pyramid before anything reaches the screen.
+                InterlockedAdd(params->counters[3u], 1u);   // rejected_A
+                params->occluded_flags[instance_id] = 1u;
+                params->visible_flags[instance_id] = 0u;
+                return;
+            }
+        }
+
+        params->occluded_flags[instance_id] = 0u;
+
+        uint group_id = params->instance_group_static[instance_id];
+        if (group_id >= params->group_count) {
+            params->visible_flags[instance_id] = 0u;
+            return;
+        }
+
+        params->visible_flags[instance_id] = 1u;
+        params->instance_groups[instance_id] = group_id;
+
+        uint slot;
+        InterlockedAdd(params->group_counts[group_id], 1u, slot);
         return;
     }
 
-    uint group_id = params.instance_group_static[instance_id];
-    if (group_id >= params.group_count) {
-        params.visible_flags[instance_id] = 0;
+    // Pass B: rescue retest of the pass-A predictions against the fresh
+    // pyramid. Instances visible in A never carry a flag and are untouched.
+    if (params->occluded_flags[instance_id] == 0u) return;
+
+    // The instance left the frustum: clear the flag and drop it. Retesting a
+    // frustum-out object every frame would be pure waste.
+    if (!sphere_inside_frustum(b.center_radius, params->frustum_planes)) {
+        params->occluded_flags[instance_id] = 0u;
         return;
     }
 
-    params.visible_flags[instance_id] = 1;
-    params.instance_groups[instance_id] = group_id;
+    if (hiz_sphere_visible(b, params)) {
+        // Rescued: re-add to the draw lists with the current-frame pyramid.
+        uint group_id = params->instance_group_static[instance_id];
+        params->visible_flags[instance_id] = 1u;
+        params->instance_groups[instance_id] = group_id;
 
-    uint slot;
-    InterlockedAdd(params.group_counts[group_id], 1, slot);
+        uint slot;
+        InterlockedAdd(params->group_counts[group_id], 1u, slot);
+        InterlockedAdd(params->counters[4u], 1u);   // rescued_B
+        params->occluded_flags[instance_id] = 0u;
+    } else {
+        // Confirmed hidden by this frame's real depth.
+        params->visible_flags[instance_id] = 0u;
+        InterlockedAdd(params->counters[5u], 1u);   // confirmed_B
+        params->occluded_flags[instance_id] = 1u;
+    }
 }

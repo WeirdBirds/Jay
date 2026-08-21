@@ -29,7 +29,7 @@ struct HiZ_Params {
     uint dst_height;
     uint mode;               // 0 = base from depth, 1 = mip-to-mip, 2 = reset
     uint dispatch_index;     // which dispatch this is (0 = base, 1..N = mips)
-    uint* counters;          // [0] base_texels, [1] mip_texels, [2] zero_tiles, [4+di] per-dispatch
+    uint* counters;          // [0] base_texels, [1] mip_texels, [2] zero_tiles, [7+di] per-dispatch
 };
 
 // Bindless heap (set 0 — matches sgpu bindless.jai):
@@ -123,7 +123,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     } else {
         InterlockedAdd(params.counters[1], 1u);
     }
-    InterlockedAdd(params.counters[3u + params.dispatch_index], 1u);
+    InterlockedAdd(params.counters[7u + params.dispatch_index], 1u);
 
     g_rw_textures_2d[params.dst_view_index][int2(int(x), int(y))] = value;
 }

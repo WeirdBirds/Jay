@@ -59,10 +59,26 @@ struct Draw_Indexed_Command {
 struct Draw_Params {
     uint group_count;
     uint instance_count;
-    uint padding0;
-    uint padding1;
+    uint cull_mode;           // 0 = pass A (frustum + history), 1 = pass B (rescue retest)
+    uint history_enabled;     // camera-motion gate: 0 = disable history test (frustum only)
 
     float4 frustum_planes[6];
+
+    // Culling helpers (Z-up left-handed, reverse-Z: near -> 1.0, far -> 0.0).
+    float4x4 view_projection; // full VP (matches the render pass)
+    float4x4 view;            // view matrix (sphere -> view-space depth)
+    float2 screen_size;       // full-res framebuffer size in pixels
+    float2 hiz_base_size;     // pyramid base dims
+    float2 ndc_coeffs;        // reverse-Z coefficients: revz(d) = coeffs.y / d - coeffs.x
+    float hiz_epsilon;        // depth slack against the tile min (never culls past it)
+    float pad_hiz;
+    uint hiz_levels;
+    uint first_frame;         // 1 => zero occluded_flags before culling
+
+    uint hiz_view_indices[16]; // storage-view index per pyramid level
+
+    uint* occluded_flags;     // persistent GPU-only: 1 = rejected last frame (history)
+    uint* counters;           // per-frame stats ring (HiZ_Counters: rejected/rescued/confirmed/history)
 
     Mesh_Instance* instances;
     float4x4* transforms;

@@ -8,6 +8,10 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
 
     uint index = dispatch_id.x;
 
+    // Zero this frame's counter slot before its chains add to it (per-frame
+    // ring, read by the CPU three frames later).
+    if (index < 32u) params.counters[index] = 0u;
+
     if (index < params.group_count) {
         params.group_counts[index] = 0;
         params.group_offsets[index] = 0;
