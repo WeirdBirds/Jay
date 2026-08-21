@@ -98,9 +98,12 @@ bool hiz_sphere_visible(Bounds b, Draw_Params* p) {
     uint x1 = uint(min(t_max.x / scale, ls.x - 1.0));
     uint y1 = uint(min(t_max.y / scale, ls.y - 1.0));
 
-    // Sample only tiles whose centre lies inside the projected disk. The
-    // square AABB always includes the clear corners around the disk; taking
-    // their min (0.0 in reverse-Z = far) would make every test pass.
+    // Conservative overlap: sample every tile the projected disk actually
+    // touches. Centre-only sampling misses tiles where the disk overlaps the
+    // tile but its centre is outside, which makes a sky tile's 0.0 disappear
+    // from the min and causes false occlusion (popping). Square AABB sampling
+    // does the opposite (too many sky tiles, no culling). Overlap is the safe
+    // middle.
     float2 c_l = (c_ndc * 0.5 + 0.5) * base / scale;   // disk centre in level tiles
     float2 r_l = r_ndc * base / scale;                 // disk half-extent in level tiles
     float2 r_inv = float2(1.0, 1.0) / max(r_l, float2(1e-4, 1e-4));
@@ -109,15 +112,17 @@ bool hiz_sphere_visible(Bounds b, Draw_Params* p) {
     bool any_covered = false;
     for (uint y = y0; y <= y1; y++) {
         for (uint x = x0; x <= x1; x++) {
-            float2 d2 = (float2(float(x) + 0.5, float(y) + 0.5) - c_l) * r_inv;
-            if (dot(d2, d2) > 1.0) continue;   // tile centre outside the disk
+            // Closest point on this tile to the disk centre.
+            float2 closest = clamp(c_l, float2(float(x), float(y)), float2(float(x)+1.0, float(y)+1.0));
+            float2 d2 = (closest - c_l) * r_inv;
+            if (dot(d2, d2) > 1.0) continue;   // no overlap
             any_covered = true;
             float v = g_rw_textures_2d[p->hiz_view_indices[level]][int2(int(x), int(y))];
             strongest = min(strongest, v);
         }
     }
 
-    // No tile centre covered: the sphere projects smaller than the sampling
+    // No tile overlapped: the sphere projects smaller than the sampling
     // grid — never claim occlusion from an empty footprint.
     if (!any_covered) return true;
 
