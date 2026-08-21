@@ -75,19 +75,17 @@ bool hiz_box_visible(Bounds b, Draw_Params* p) {
     float2 min_ndc = max(ndc_min, float2(-1.0, -1.0));
     float2 max_ndc = min(ndc_max, float2(1.0, 1.0));
     if (min_ndc.x >= max_ndc.x || min_ndc.y >= max_ndc.y) return true;
+    // No mips: sample at base (most accurate, gap stays free). Scale keeps 4x4 blocks? No, base only.
+    uint level = 0;
+    float scale = 1.0;
     float2 base = p->hiz_base_size;
     float2 t_min = (min_ndc * 0.5 + 0.5) * base;
     float2 t_max = (max_ndc * 0.5 + 0.5) * base;
-    float2 span = t_max - t_min;
-    float lf = log2(max(span.x, span.y) / 4.0);
-    uint level = lf > 0.0 ? uint(lf) + 1u : 0u;
-    if (level >= p->hiz_levels) level = p->hiz_levels - 1u;
-    float scale = exp2(float(level));
-    float2 ls = base / scale;
-    uint x0 = uint(max(t_min.x / scale, 0.0));
-    uint y0 = uint(max(t_min.y / scale, 0.0));
-    uint x1 = uint(min(t_max.x / scale, ls.x - 1.0));
-    uint y1 = uint(min(t_max.y / scale, ls.y - 1.0));
+    float2 ls = base;
+    uint x0 = uint(max(t_min.x, 0.0));
+    uint y0 = uint(max(t_min.y, 0.0));
+    uint x1 = uint(min(t_max.x, ls.x - 1.0));
+    uint y1 = uint(min(t_max.y, ls.y - 1.0));
     float strongest = 1.0;
     bool any_covered = false;
     for (uint y = y0; y <= y1; y++) {
