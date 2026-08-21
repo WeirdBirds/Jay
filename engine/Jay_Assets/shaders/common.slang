@@ -25,7 +25,8 @@ struct Material {
 }
 
 struct Bounds {
-    float4 center_radius; 
+    float4 center;  // xyz center
+    float4 extents; // xyz half extents
 }
 
 struct Mesh_Instance {
