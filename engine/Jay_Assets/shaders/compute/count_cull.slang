@@ -18,6 +18,8 @@
 // Counters (HiZ_Counters ring): [3] rejected_A (predicted), [4] rescued_B,
 // [5] confirmed_B, [6] history tests run. Conservation invariant:
 // rejected_A == rescued_B + confirmed_B.
+// The ring is zeroed once per frame by chain A's reset dispatch
+// (Draw_Params.reset_counters); chain B's reset must leave it alone.
 //
 // Reverse-Z, Z-up left-handed, depth test GREATER, conservative reduction
 // MIN: the pyramid tile value is the farthest occluder surface, so a tile can
@@ -86,8 +88,12 @@ bool hiz_sphere_visible(Bounds b, Draw_Params* p) {
     float2 t_min = (min_ndc * 0.5 + 0.5) * base;
     float2 t_max = (max_ndc * 0.5 + 0.5) * base;
     float2 span = t_max - t_min;
-    float lf = log2(max(span.x, span.y) / 4.0);
-    uint level = lf > 0.0 ? uint(lf) + 1u : 0u;
+    // Smallest level whose tiles are <= 2x2 over the AABB: need
+    // span / 2^level <= 2, i.e. level >= log2(span / 2). Ceil, no skip —
+    // the old uint(lf)+1 jumped one level too far (span 8 -> level 2),
+    // over-coarsening the test.
+    float lf = log2(max(span.x, span.y) * 0.5);
+    uint level = lf > 0.0 ? uint(ceil(lf)) : 0u;
     if (level >= p->hiz_levels) level = p->hiz_levels - 1u;
     float scale = exp2(float(level));
     float2 ls = base / scale;
@@ -162,11 +168,6 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     uint instance_id = dispatch_id.x;
     if (instance_id >= params->instance_count) return;
 
-    if ((params->instances[instance_id].flags & 1u) != 0u) {
-        params->visible_flags[instance_id] = 0u;
-        return;
-    }
-
     Bounds b = params->bounds[instance_id];
 
     if (params->cull_mode == 0u) {
@@ -179,6 +180,14 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
             params->occluded_flags[instance_id] = 0u;
         }
 
+        if ((params->instances[instance_id].flags & 1u) != 0u) {
+            // Dead slot. Clear any stale reject left over from before the
+            // instance was destroyed — otherwise pass B keeps rescuing and
+            // re-confirming a ghost every frame the rescue chain runs.
+            params->visible_flags[instance_id] = 0u;
+            params->occluded_flags[instance_id] = 0u;
+            return;
+        }
         if (!sphere_inside_frustum(b.center_radius, params->frustum_planes)) {
             params->occluded_flags[instance_id] = 0u;
             params->visible_flags[instance_id] = 0u;
@@ -208,14 +217,21 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
         params->visible_flags[instance_id] = 1u;
         params->instance_groups[instance_id] = group_id;
 
+
         uint slot;
         InterlockedAdd(params->group_counts[group_id], 1u, slot);
         return;
     }
 
     // Pass B: rescue retest of the pass-A predictions against the fresh
-    // pyramid. Instances visible in A never carry a flag and are untouched.
-    if (params->occluded_flags[instance_id] == 0u) return;
+    // pyramid. Instances visible in A never carry a flag; CLEAR their stale
+    // pass-A visibility bit — otherwise this chain's scatter would re-add
+    // every pass-A survivor into the rescue draw list at wrong offsets
+    // (group scratch was just reset; masked in single-group scenes).
+    if (params->occluded_flags[instance_id] == 0u) {
+        params->visible_flags[instance_id] = 0u;
+        return;
+    }
 
     // The instance left the frustum: clear the flag and drop it. Retesting a
     // frustum-out object every frame would be pure waste.

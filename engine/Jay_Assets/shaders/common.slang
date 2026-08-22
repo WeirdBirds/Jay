@@ -61,6 +61,8 @@ struct Draw_Params {
     uint instance_count;
     uint cull_mode;           // 0 = pass A (frustum + history), 1 = pass B (rescue retest)
     uint history_enabled;     // camera-motion gate: 0 = disable history test (frustum only)
+    uint reset_counters;      // 1 = reset dispatch also zeroes the HiZ stats ring (chain A only;
+                              //     chain B must NOT wipe what chain A / hiz_build already wrote)
 
     float4 frustum_planes[6];
 

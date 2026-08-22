@@ -18,5 +18,12 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     }
 
     params.total_visible[0] = sum;
-    params.counters[19u] = sum; // debug: total visible
+    // Debug slot [19] belongs to chain A (readback shows pass-A visibility).
+    // Chain B reports its rescued-only total in [23] so the chains stop
+    // overwriting each other's telemetry.
+    if (params.cull_mode == 0u) {
+        params.counters[19u] = sum;
+    } else {
+        params.counters[23u] = sum;
+    }
 }
