@@ -18,12 +18,11 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     }
 
     params.total_visible[0] = sum;
-    // Debug slot [19] belongs to chain A (readback shows pass-A visibility).
-    // Chain B reports its rescued-only total in [23] so the chains stop
-    // overwriting each other's telemetry.
-    if (params.cull_mode == 0u) {
+#if JAY_DEBUG
+    // Debug slot [19] holds the pass-A visible total (the Frame log's vis).
+    // Chain B reports nothing here — its prefix would overwrite pass A's number.
+    if (params.cull_mode == 0u && params.counters != nullptr) {
         params.counters[19u] = sum;
-    } else {
-        params.counters[23u] = sum;
     }
+#endif
 }

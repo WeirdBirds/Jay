@@ -60,14 +60,6 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     uint x = dispatch_id.x;
     uint y = dispatch_id.y;
 
-    if (params.mode == 2u) {
-        // Reset the per-frame counters. Ordered on the same queue before the
-        // build dispatches, so the values the CPU logged three frames ago are
-        // already complete; the reset cannot clobber them.
-        if (x < 32u) params.counters[x] = 0u;
-        return;
-    }
-
     if (x >= params.dst_width || y >= params.dst_height) return;
 
     uint sx0 = x * 2u;
@@ -100,9 +92,11 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
                 g_samplers[params.sampler_index], uv11, 0.0).x;
 
             value = min(min(d00, d10), min(d01, d11));
-            if (value == 0.0) {
+#if JAY_DEBUG
+            if (value == 0.0 && params.counters != nullptr) {
                 InterlockedAdd(params.counters[2], 1u);
             }
+#endif
         } else {
             int2 i00 = int2(int(sx0), int(sy0));
             int2 i10 = int2(int(sx1), int(sy0));
@@ -118,12 +112,16 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
         }
     }
 
-    if (params.mode == 0u) {
-        InterlockedAdd(params.counters[0], 1u);
-    } else {
-        InterlockedAdd(params.counters[1], 1u);
+#if JAY_DEBUG
+    if (params.counters != nullptr) {
+        if (params.mode == 0u) {
+            InterlockedAdd(params.counters[0], 1u);
+        } else {
+            InterlockedAdd(params.counters[1], 1u);
+        }
+        InterlockedAdd(params.counters[7u + params.dispatch_index], 1u);
     }
-    InterlockedAdd(params.counters[7u + params.dispatch_index], 1u);
+#endif
 
     g_rw_textures_2d[params.dst_view_index][int2(int(x), int(y))] = value;
 }

@@ -174,15 +174,14 @@ Jay::Texture2D_Array layer_textures;
 
 ## Reflection and codegen pipeline
 
-Current asset pipeline has `.slang -> Shader_Data` through `handlers/slang.jai`. Extend this handler or add a companion material reflection step.
+Jay_Render compiles each `.slang` source directly through `compile_pipeline_shader`. Material reflection must share that path and return reflection with the compiled SPIR-V; it must not restore a generic Slang asset handler.
 
 Required output per shader asset:
 
 ```jai
-Shader_Data :: struct {
+Shader_Compile_Output :: struct {
     spirv: []u8;
     reflection: Shader_Reflection;
-    // existing fields...
 }
 
 Shader_Reflection :: struct {
@@ -644,9 +643,9 @@ Use Jay::Texture2D_Array for arrays of textures.
 
 ### Stage 1: Reflection metadata
 
-- Extend Slang asset handler to preserve reflection metadata.
+- Extend direct Slang compilation to return reflection metadata.
 - Detect top-level `Jay::Params<T>`, `Jay::Texture2D`, `Jay::Sampler` fields.
-- Serialize `Shader_Reflection` into `Shader_Data`.
+- Keep `Shader_Reflection` with the direct compile output.
 - Generate and store layout hash.
 
 ### Stage 2: Jai codegen

@@ -16,14 +16,6 @@ struct Fragment_Data<T> {
     [ForceInline] T* get() { return data; }
 };
 
-struct Material {
-    float4 base_color;
-    uint texture_index;
-    uint sampler_index;
-    uint flags;
-    uint padding;
-}
-
 struct Bounds {
     float4 center_radius; 
 }
@@ -31,8 +23,7 @@ struct Bounds {
 struct Mesh_Instance {
     uint mesh_id;
     uint flags;
-    uint material_index;
-    uint padding;
+    uint64_t material;
 }
 
 struct Mesh {     
@@ -69,7 +60,6 @@ struct Draw_Params {
     // Culling helpers (Z-up left-handed, reverse-Z: near -> 1.0, far -> 0.0).
     float4x4 view_projection; // full VP (matches the render pass)
     float4x4 view;            // view matrix (sphere -> view-space depth)
-    float2 screen_size;       // full-res framebuffer size in pixels
     float2 hiz_base_size;     // pyramid base dims
     float2 ndc_coeffs;        // reverse-Z coefficients: revz(d) = coeffs.y / d - coeffs.x
     float hiz_epsilon;        // depth slack against the tile min (never culls past it)
@@ -125,6 +115,5 @@ struct Vertex_Output {
 
 struct Fragment_Params {
     Mesh_Instance* instances;
-    Material* materials;
 }
 

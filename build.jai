@@ -69,7 +69,7 @@
                     build_options.backend = .LLVM;
                     set_optimization(*build_options, Optimization_Type.OPTIMIZED_VERY_SMALL, false);
                 case "debug"; #through;
-                case "-release_debug";
+                case "-do";
                     build_options.backend = .LLVM;
                     build_options.llvm_options.disable_inlining = true;
                     set_optimization(*build_options, Optimization_Type.OPTIMIZED_VERY_SMALL, true);

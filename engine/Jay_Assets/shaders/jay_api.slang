@@ -34,20 +34,4 @@ Texture2D g_textures_2d[];
 [[vk::binding(2, 0)]]
 SamplerState g_samplers[];
 
-namespace Jay {
-    struct Sampler {
-        uint* index;
-    }
-
-    struct Params<T> {
-        T* data;
-        T get() { return *data; }
-    }
-
-    struct Texture2D {
-        uint* index;
-        float4 sample(float2 uv, Sampler s) {
-            return g_textures_2d[*index].Sample(g_samplers[*s.index], uv);
-        }
-    }
-}
+#include "jay_material.slang"

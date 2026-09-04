@@ -13,7 +13,9 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     // chain A sets it, chain B leaves it clear so the stats written earlier
     // in the frame (hiz_build base/mip/zero, pass-A rejected/history)
     // survive until readback.
-    if (params.reset_counters != 0u && index < 32u) params.counters[index] = 0u;
+#if JAY_DEBUG
+    if (params.reset_counters != 0u && params.counters != nullptr && index < 32u) params.counters[index] = 0u;
+#endif
 
     if (index < params.group_count) {
         params.group_counts[index] = 0;
