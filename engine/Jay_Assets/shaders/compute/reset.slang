@@ -21,6 +21,13 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
         params.group_counts[index] = 0;
         params.group_offsets[index] = 0;
         params.group_write_cursor[index] = 0;
+        // Uncompacted command slot: the CPU draws group g from slot g, so an
+        // empty group must be a no-op draw (index_count 0), never stale data.
+        params.draw_commands[index].index_count = 0;
+        params.draw_commands[index].instance_count = 0;
+        params.draw_commands[index].first_index = 0;
+        params.draw_commands[index].vertex_offset = 0;
+        params.draw_commands[index].first_instance = 0;
     }
 
     if (index == 0) {

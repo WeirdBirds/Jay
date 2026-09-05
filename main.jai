@@ -1,5 +1,5 @@
 #import "Basic"()(MEMORY_DEBUGGER = true);
-#import "Jay_Render";
+#import "Jay_Render"(DEBUG = true, RENDER_CAPTURE = true);
 #import "Jay_Core";
 #import "Random";
 
@@ -9,7 +9,7 @@ Demo_Scene :: struct {
     
     Opaque_Material :: Material(
         vertex = "/shaders/vertex/opaque.slang",
-        fragment = "/shaders/fragment/opaque.slang"
+        fragment = "/shaders/fragment/opaque.slang",
     );
 
     begin :: (engine: *Engine) {
@@ -19,19 +19,21 @@ Demo_Scene :: struct {
         mesh_id := gpu_upload_mesh(*render.data, mesh);
 
         colors := Vec4.[
-            .{x=0.8, y=0.3, z=0.2, w=1},
-            .{x=0.3, y=0.8, z=0.2, w=1},
-            .{x=0.2, y=0.3, z=0.8, w=1},
+            .{x=0.8, y=0.3, z=0.2, w=0.1},
+            .{x=0.3, y=0.8, z=0.2, w=0.1},
+            .{x=0.2, y=0.3, z=0.8, w=0.1},
         ];
 
         materials: [3]Material_Id;
+
         for i: 0..materials.count - 1 {
             recipe: Opaque_Material;
             recipe.fragment.opaque.base_color = colors[i];
             materials[i] = upload_material(*render.data, *recipe);
         }
 
-        group_id := new_draw_group(*render.data, mesh_id);
+        group_id := new_draw_group(*render.data, mesh_id, Opaque_Material.MATERIAL_INDEX);
+
         for i: 0..100 {
             for j: 0..100 {
                 size: float32 = xx (random_get_zero_to_one_new() + 0.1) * 0.5;

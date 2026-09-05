@@ -12,8 +12,10 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     uint count = params.group_counts[group_id];
     if (count == 0) return;
 
-    uint draw_index;
-    InterlockedAdd(params.draw_count[0], 1, draw_index);
+    // Uncompacted slot: command for group g lives at slot g, so the CPU can
+    // draw per (domain, pipeline) group without knowing GPU compaction order.
+    // The draw_count atomic survives for stats only.
+    InterlockedAdd(params.draw_count[0], 1u);
 #if JAY_DEBUG
     if (params.counters != nullptr) InterlockedAdd(params.counters[18u], 1u); // debug: draw commands emitted
 #endif
@@ -28,5 +30,5 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     cmd.vertex_offset  = mesh.vertex_offset;
     cmd.first_instance = params.group_offsets[group_id];
 
-    params.draw_commands[draw_index] = cmd;
+    params.draw_commands[group_id] = cmd;
 }
