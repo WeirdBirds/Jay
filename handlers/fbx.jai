@@ -34,6 +34,25 @@ FBX_Geometry :: struct {
     uv_reference:     string;
 }
 
+FBX_Geometry_Record :: struct {
+    id: u64;
+    geometry: FBX_Geometry;
+}
+
+FBX_Model :: struct {
+    id: u64;
+    geometry_id: u64;
+    parent_id: u64;
+    translation: Vec3;
+    rotation: Vec3;
+    scale: Vec3 = .{1, 1, 1};
+}
+
+FBX_Connection :: struct {
+    source_id: u64;
+    destination_id: u64;
+}
+
 import :: (in_path: string) -> Mesh_Data {
     data := read_entire_file(in_path);
 
@@ -48,11 +67,21 @@ import :: (in_path: string) -> Mesh_Data {
         version = read_u32(data, 23),
     };
 
-    vertices: [..] Vertex;
-    indices:  [..] u32;
+    geometries:  [..] FBX_Geometry_Record;
+    models:      [..] FBX_Model;
+    connections: [..] FBX_Connection;
 
     while can_read_node_header(*parser) {
-        if !parse_fbx_node(*parser, *vertices, *indices) then break;
+        if !parse_fbx_node(*parser, *geometries, *models, *connections) then break;
+    }
+
+    resolve_fbx_connections(geometries, *models, connections);
+
+    vertices: [..] Vertex;
+    indices:  [..] u32;
+    for *record: geometries {
+        model := find_fbx_model(models, record.id);
+        append_geometry_mesh(*record.geometry, model, models, *vertices, *indices);
     }
 
     if vertices.count == 0 || indices.count == 0 {
@@ -86,7 +115,7 @@ get_node_header_size :: (version: u32) -> s64 {
     return 13;
 }
 
-parse_fbx_node :: (p: *FBX_Parser, vertices: *[..]Vertex, indices: *[..]u32) -> bool {
+parse_fbx_node :: (p: *FBX_Parser, geometries: *[..]FBX_Geometry_Record, models: *[..]FBX_Model, connections: *[..]FBX_Connection) -> bool {
     header := read_node_header(p);
     if header.end_offset == 0 then return false;
     if header.end_offset > p.data.count {
@@ -96,16 +125,31 @@ parse_fbx_node :: (p: *FBX_Parser, vertices: *[..]Vertex, indices: *[..]u32) -> 
     }
 
     if header.name == "Geometry" {
-        geom: FBX_Geometry;
-        parse_geometry_children(p, header.end_offset, *geom);
-        append_geometry_mesh(*geom, vertices, indices);
+        record: FBX_Geometry_Record;
+        record.id = read_u64_property(p);
+        parse_geometry_children(p, header.end_offset, header.property_count - 1, *record.geometry);
+        array_add(geometries, record);
+        p.offset = header.end_offset;
+        return true;
+    }
+
+    if header.name == "Model" {
+        model := parse_fbx_model(p, header.end_offset, header.property_count);
+        array_add(models, model);
+        p.offset = header.end_offset;
+        return true;
+    }
+
+    if header.name == "C" {
+        connection := parse_fbx_connection(p, header.property_count);
+        if connection.source_id != 0 && connection.destination_id != 0 then array_add(connections, connection);
         p.offset = header.end_offset;
         return true;
     }
 
     skip_properties(p, header.property_count);
     while p.offset < header.end_offset {
-        if !parse_fbx_node(p, vertices, indices) then break;
+        if !parse_fbx_node(p, geometries, models, connections) then break;
     }
     p.offset = header.end_offset;
     return true;
@@ -135,8 +179,85 @@ read_node_header :: (p: *FBX_Parser) -> FBX_Node_Header {
     return h;
 }
 
-parse_geometry_children :: (p: *FBX_Parser, end_offset: s64, geom: *FBX_Geometry) {
-    skip_properties(p, 0);
+parse_fbx_model :: (p: *FBX_Parser, end_offset: s64, property_count: s64) -> FBX_Model {
+    model: FBX_Model;
+    model.id = read_u64_property(p);
+    skip_properties(p, property_count - 1);
+
+    while p.offset < end_offset {
+        child := read_node_header(p);
+        if child.end_offset == 0 then break;
+        if child.name == "Properties70" {
+            parse_fbx_model_properties(p, child.end_offset, child.property_count, *model);
+        } else {
+            skip_properties(p, child.property_count);
+        }
+        p.offset = child.end_offset;
+    }
+    return model;
+}
+
+parse_fbx_model_properties :: (p: *FBX_Parser, end_offset: s64, property_count: s64, model: *FBX_Model) {
+    skip_properties(p, property_count);
+    while p.offset < end_offset {
+        property := read_node_header(p);
+        if property.end_offset == 0 then break;
+        if property.name == "P" {
+            name := read_first_string_property(p);
+            skip_properties(p, 3);
+            if name == "Lcl Translation" {
+                model.translation = read_vec3_properties(p);
+            } else if name == "Lcl Rotation" {
+                model.rotation = read_vec3_properties(p);
+            } else if name == "Lcl Scaling" {
+                model.scale = read_vec3_properties(p);
+            }
+        } else {
+            skip_properties(p, property.property_count);
+        }
+        p.offset = property.end_offset;
+    }
+}
+
+parse_fbx_connection :: (p: *FBX_Parser, property_count: s64) -> FBX_Connection {
+    connection: FBX_Connection;
+    kind := read_first_string_property(p);
+    if kind != "OO" return connection;
+    connection.source_id = read_u64_property(p);
+    connection.destination_id = read_u64_property(p);
+    skip_properties(p, property_count - 3);
+    return connection;
+}
+
+resolve_fbx_connections :: (geometries: []FBX_Geometry_Record, models: *[..]FBX_Model, connections: []FBX_Connection) {
+    for connection: connections {
+        if find_fbx_geometry(geometries, connection.source_id) {
+            model := find_fbx_model_by_id(models.*, connection.destination_id);
+            if model then model.geometry_id = connection.source_id;
+        } else if find_fbx_model_by_id(models.*, connection.source_id) {
+            model := find_fbx_model_by_id(models.*, connection.source_id);
+            model.parent_id = connection.destination_id;
+        }
+    }
+}
+
+find_fbx_geometry :: (geometries: []FBX_Geometry_Record, id: u64) -> bool {
+    for record: geometries if record.id == id then return true;
+    return false;
+}
+
+find_fbx_model :: (models: []FBX_Model, geometry_id: u64) -> *FBX_Model {
+    for *model: models if model.geometry_id == geometry_id then return model;
+    return null;
+}
+
+find_fbx_model_by_id :: (models: []FBX_Model, id: u64) -> *FBX_Model {
+    for *model: models if model.id == id then return model;
+    return null;
+}
+
+parse_geometry_children :: (p: *FBX_Parser, end_offset: s64, property_count: s64, geom: *FBX_Geometry) {
+    skip_properties(p, property_count);
 
     while p.offset < end_offset {
         child := read_node_header(p);
@@ -147,11 +268,11 @@ parse_geometry_children :: (p: *FBX_Parser, end_offset: s64, geom: *FBX_Geometry
         } else if child.name == "PolygonVertexIndex" {
             read_s32_array_property(p, *geom.polygon_indices);
         } else if child.name == "LayerElementNormal" {
-            parse_layer_element_normal(p, child.end_offset, geom);
+            parse_layer_element_normal(p, child.end_offset, child.property_count, geom);
             p.offset = child.end_offset;
             continue;
         } else if child.name == "LayerElementUV" {
-            parse_layer_element_uv(p, child.end_offset, geom);
+            parse_layer_element_uv(p, child.end_offset, child.property_count, geom);
             p.offset = child.end_offset;
             continue;
         } else {
@@ -162,8 +283,8 @@ parse_geometry_children :: (p: *FBX_Parser, end_offset: s64, geom: *FBX_Geometry
     }
 }
 
-parse_layer_element_normal :: (p: *FBX_Parser, end_offset: s64, geom: *FBX_Geometry) {
-    skip_properties(p, 1);
+parse_layer_element_normal :: (p: *FBX_Parser, end_offset: s64, property_count: s64, geom: *FBX_Geometry) {
+    skip_properties(p, property_count);
 
     while p.offset < end_offset {
         child := read_node_header(p);
@@ -185,8 +306,8 @@ parse_layer_element_normal :: (p: *FBX_Parser, end_offset: s64, geom: *FBX_Geome
     }
 }
 
-parse_layer_element_uv :: (p: *FBX_Parser, end_offset: s64, geom: *FBX_Geometry) {
-    skip_properties(p, 1);
+parse_layer_element_uv :: (p: *FBX_Parser, end_offset: s64, property_count: s64, geom: *FBX_Geometry) {
+    skip_properties(p, property_count);
 
     while p.offset < end_offset {
         child := read_node_header(p);
@@ -208,7 +329,7 @@ parse_layer_element_uv :: (p: *FBX_Parser, end_offset: s64, geom: *FBX_Geometry)
     }
 }
 
-append_geometry_mesh :: (geom: *FBX_Geometry, vertices: *[..]Vertex, indices: *[..]u32) {
+append_geometry_mesh :: (geom: *FBX_Geometry, model: *FBX_Model, models: []FBX_Model, vertices: *[..]Vertex, indices: *[..]u32) {
     if geom.positions.count == 0 || geom.polygon_indices.count == 0 then return;
 
     face: [..]u32;
@@ -222,7 +343,7 @@ append_geometry_mesh :: (geom: *FBX_Geometry, vertices: *[..]Vertex, indices: *[
             end_polygon = true;
         }
 
-        vertex_index := append_fbx_vertex(geom, source_index, polygon_vertex, vertices);
+        vertex_index := append_fbx_vertex(geom, model, models, source_index, polygon_vertex, vertices);
         array_add(*face, vertex_index);
 
         if end_polygon {
@@ -234,7 +355,7 @@ append_geometry_mesh :: (geom: *FBX_Geometry, vertices: *[..]Vertex, indices: *[
     }
 }
 
-append_fbx_vertex :: (geom: *FBX_Geometry, position_index: s32, polygon_vertex: s64, vertices: *[..]Vertex) -> u32 {
+append_fbx_vertex :: (geom: *FBX_Geometry, model: *FBX_Model, models: []FBX_Model, position_index: s32, polygon_vertex: s64, vertices: *[..]Vertex) -> u32 {
     vtx: Vertex;
     if position_index >= 0 && position_index < geom.positions.count {
         vtx.position = geom.positions[position_index];
@@ -242,11 +363,59 @@ append_fbx_vertex :: (geom: *FBX_Geometry, position_index: s32, polygon_vertex: 
 
     vtx.normal = get_mapped_normal(geom, cast(s64) position_index, polygon_vertex);
     vtx.uv     = get_mapped_uv(geom, cast(s64) position_index, polygon_vertex);
+    if model {
+        vtx.position = apply_fbx_model_transform(vtx.position, model, models);
+        vtx.normal = normalize(apply_fbx_model_rotation(vtx.normal, model, models));
+    }
 
     array_add(vertices, vtx);
     return cast(u32) (vertices.count - 1);
 }
 
+// FBX stores source positions as X/Y/Z. Geometry decoding maps those to
+// Jay's X-forward/Y-right/Z-up form: source(x,y,z) -> jay(z,x,y).
+// Apply model transforms in source space, then map back; models can also
+// form a parent chain through OO connections.
+apply_fbx_model_transform :: (point: Vec3, model: *FBX_Model, models: []FBX_Model) -> Vec3 {
+    source := apply_fbx_source_transform(Vec3.{point.y, point.z, point.x}, model, models);
+    return Vec3.{source.z, source.x, source.y};
+}
+
+apply_fbx_source_transform :: (point: Vec3, model: *FBX_Model, models: []FBX_Model) -> Vec3 {
+    result := apply_fbx_rotation(point * model.scale, model.rotation) + model.translation;
+    if model.parent_id != 0 {
+        parent := find_fbx_model_by_id(models, model.parent_id);
+        if parent then return apply_fbx_source_transform(result, parent, models);
+    }
+    return result;
+}
+
+apply_fbx_model_rotation :: (normal: Vec3, model: *FBX_Model, models: []FBX_Model) -> Vec3 {
+    source := apply_fbx_source_rotation(Vec3.{normal.y, normal.z, normal.x}, model, models);
+    return Vec3.{source.z, source.x, source.y};
+}
+
+apply_fbx_source_rotation :: (normal: Vec3, model: *FBX_Model, models: []FBX_Model) -> Vec3 {
+    result := apply_fbx_rotation(normal, model.rotation);
+    if model.parent_id != 0 {
+        parent := find_fbx_model_by_id(models, model.parent_id);
+        if parent then return apply_fbx_source_rotation(result, parent, models);
+    }
+    return result;
+}
+
+apply_fbx_rotation :: (point: Vec3, rotation: Vec3) -> Vec3 {
+    // Jay's Euler convention is Rz(yaw) * Ry(-pitch) * Rx(-roll).
+    // Negating FBX X/Y gives standard FBX XYZ Euler composition.
+    m := to_matrix(Euler.{-rotation.x, -rotation.y, rotation.z});
+    return Vec3.{
+        m._11 * point.x + m._12 * point.y + m._13 * point.z,
+        m._21 * point.x + m._22 * point.y + m._23 * point.z,
+        m._31 * point.x + m._32 * point.y + m._33 * point.z,
+    };
+}
+
+// FBX source winding is counter-clockwise after conversion to Jay's basis.
 triangulate_face :: (face: []u32, indices: *[..]u32) {
     if face.count < 3 then return;
     for i: 1 .. face.count - 2 {
@@ -339,7 +508,9 @@ read_vec2_array_property :: (p: *FBX_Parser, out: *[..]Vec2) {
 
     i: s64 = 0;
     while i <= values.count - 2 {
-        array_add(out, Vec2.{ values[i + 0], values[i + 1] });
+        // FBX U/V uses image-space V opposite to stb_image's scanline order.
+        // Preserve U; invert V. Triangle winding never changes UV indices.
+        array_add(out, Vec2.{ values[i + 0], 1.0 - values[i + 1] });
         i += 2;
     }
 }
@@ -410,6 +581,41 @@ read_s32_array_property :: (p: *FBX_Parser, out: *[..]s32) {
     p.offset += byte_count;
 }
 
+read_u64_property :: (p: *FBX_Parser) -> u64 {
+    if p.offset >= p.data.count then return 0;
+    kind := read_u8(p.data, p.offset);
+    p.offset += 1;
+    if kind != #char "L" {
+        skip_property_payload(p, kind);
+        return 0;
+    }
+    result := read_u64(p.data, p.offset);
+    p.offset += 8;
+    return result;
+}
+
+read_float_property :: (p: *FBX_Parser) -> float32 {
+    if p.offset >= p.data.count then return 0;
+    kind := read_u8(p.data, p.offset);
+    p.offset += 1;
+    if kind == #char "D" {
+        result := cast(float32) read_f64(p.data, p.offset);
+        p.offset += 8;
+        return result;
+    }
+    if kind == #char "F" {
+        result := read_f32(p.data, p.offset);
+        p.offset += 4;
+        return result;
+    }
+    skip_property_payload(p, kind);
+    return 0;
+}
+
+read_vec3_properties :: (p: *FBX_Parser) -> Vec3 {
+    return .{ read_float_property(p), read_float_property(p), read_float_property(p) };
+}
+
 read_first_string_property :: (p: *FBX_Parser) -> string {
     if p.offset >= p.data.count then return "";
     kind := read_u8(p.data, p.offset);
@@ -465,11 +671,15 @@ read_u8 :: (data: string, offset: s64) -> u8 {
     return cast(u8) data[offset];
 }
 
+// NOTE: cast() is greedy in Jai — cast(u32) x << 8 parses as
+// cast(u32)(x << 8), which overflows in u8 and yields 0. Parenthesize
+// the cast before shifting, or every multi-byte read keeps only byte 0
+// (this made version read 20 instead of 7700 and derailed all headers).
 read_u32 :: (data: string, offset: s64) -> u32 {
     return (cast(u32) read_u8(data, offset + 0)) |
-           (cast(u32) read_u8(data, offset + 1) << 8) |
-           (cast(u32) read_u8(data, offset + 2) << 16) |
-           (cast(u32) read_u8(data, offset + 3) << 24);
+           ((cast(u32) read_u8(data, offset + 1)) << 8) |
+           ((cast(u32) read_u8(data, offset + 2)) << 16) |
+           ((cast(u32) read_u8(data, offset + 3)) << 24);
 }
 
 read_u64 :: (data: string, offset: s64) -> u64 {
@@ -478,8 +688,10 @@ read_u64 :: (data: string, offset: s64) -> u64 {
     return lo | (hi << 32);
 }
 
+// PolygonVertexIndex uses negative terminators, so the u32 bits must be
+// reinterpreted, not range-checked: plain cast() panics on values > S32_MAX.
 read_s32 :: (data: string, offset: s64) -> s32 {
-    return cast(s32) read_u32(data, offset);
+    return cast,no_check(s32) read_u32(data, offset);
 }
 
 read_f32 :: (data: string, offset: s64) -> float32 {
