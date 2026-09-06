@@ -1,3 +1,19 @@
+struct Weighted_OIT_Output {
+    float4 accumulation : SV_Target0;
+    float revealage : SV_Target1;
+};
+
+Weighted_OIT_Output weighted_oit(float4 color, float depth) {
+    float weight = clamp(
+        pow(min(1.0, color.a * 10.0) + 0.01, 3.0) * 1e4 * pow(0.1 + depth * 0.9, 3.0),
+        1e-2,
+        3e3);
+    Weighted_OIT_Output output;
+    output.accumulation = float4(color.rgb * color.a, color.a) * weight;
+    output.revealage = color.a;
+    return output;
+}
+
 namespace Jay {
     // Compiler-private material blob helpers. Shader authors use ordinary
     // function parameters; generated _jay_main resolves these once.

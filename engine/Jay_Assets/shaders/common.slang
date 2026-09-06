@@ -115,5 +115,7 @@ struct Vertex_Output {
 
 struct Fragment_Params {
     Mesh_Instance* instances;
+    uint oit_accumulator;
+    uint oit_revealage;
 }
 

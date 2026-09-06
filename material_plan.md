@@ -92,7 +92,7 @@ Each `Mesh_Instance` stores one direct material blob pointer. GPU culling preser
 
 Draw groups select a pipeline and mesh. They do not select a material instance. Many material blobs may share one pipeline.
 
-Opaque and translucent domains remain explicit in `Material(..., domain)`. Opaque renders first with depth writes. Translucent renders after opaque with blending and depth reads.
+Opaque and translucent domains remain explicit in `Material(..., domain)`. Opaque renders first with depth writes. Translucent uses weighted blended order-independent transparency: it accumulates weighted premultiplied color in `R16G16B16A16_SFLOAT`, multiplies revealage in `R16_SFLOAT`, then composites once over opaque color. Transparent material draw order does not affect this result. The method is approximate, but needs one transparent draw pass and one fullscreen composite pass.
 
 ## Validation
 
