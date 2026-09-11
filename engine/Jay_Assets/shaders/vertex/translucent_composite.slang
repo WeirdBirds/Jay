@@ -1,4 +1,4 @@
-#include "../jay_api.slang"
+#include "jay.slang"
 
 [shader("vertex")]
 float4 main(uint vertex_id : SV_VertexID) : SV_Position {

@@ -1,8 +1,9 @@
-#include "../jay_api.slang"
+#include "jay.slang"
 
 struct Textured_Params {
     float4 base_color;
     float2 uv_shift;
+    float4x4 temp;
 };
 
 float4 main(

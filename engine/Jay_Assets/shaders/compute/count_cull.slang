@@ -25,7 +25,7 @@
 // MIN: the pyramid tile value is the farthest occluder surface, so a tile can
 // never hide anything it does not actually cover.
 
-#include "../jay_api.slang"
+#include "jay.slang"
 
 // Bindless heap (set 0 — matches sgpu bindless.jai):
 //   binding 1: storage images (element index = gpu_texture_view handle)
@@ -163,7 +163,7 @@ bool hiz_sphere_visible(Bounds b, Draw_Params* p) {
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void main(uint3 dispatch_id : SV_DispatchThreadID) {
-    Draw_Params* params = p.get();
+    Draw_Params* params = cp.get();
 
     uint instance_id = dispatch_id.x;
     if (instance_id >= params->instance_count) return;
@@ -195,13 +195,13 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
         }
 
         if (params->history_enabled != 0u) {
-#if JAY_DEBUG
+#if DEBUG
             if (params->counters != nullptr) InterlockedAdd(params->counters[6u], 1u);   // history test run
 #endif
             if (!hiz_sphere_visible(b, params)) {
                 // Predicted occluded — pass B retests against the fresh
                 // pyramid before anything reaches the screen.
-#if JAY_DEBUG
+#if DEBUG
                 if (params->counters != nullptr) InterlockedAdd(params->counters[3u], 1u);   // rejected_A
 #endif
                 params->occluded_flags[instance_id] = 1u;
@@ -252,14 +252,14 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
 
         uint slot;
         InterlockedAdd(params->group_counts[group_id], 1u, slot);
-#if JAY_DEBUG
+#if DEBUG
         if (params->counters != nullptr) InterlockedAdd(params->counters[4u], 1u);   // rescued_B
 #endif
         params->occluded_flags[instance_id] = 0u;
     } else {
         // Confirmed hidden by this frame's real depth.
         params->visible_flags[instance_id] = 0u;
-#if JAY_DEBUG
+#if DEBUG
         if (params->counters != nullptr) InterlockedAdd(params->counters[5u], 1u);   // confirmed_B
 #endif
         params->occluded_flags[instance_id] = 1u;

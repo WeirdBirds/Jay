@@ -1,4 +1,4 @@
-#include "../jay_api.slang"
+#include "jay.slang"
 
 struct Opaque_Params {
     float4 base_color;

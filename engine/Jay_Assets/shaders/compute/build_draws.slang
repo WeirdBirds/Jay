@@ -1,10 +1,10 @@
-#include "../jay_api.slang"
+#include "jay.slang"
 
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void main(uint3 dispatch_id : SV_DispatchThreadID) {
 
-    Draw_Params* params = p.get();
+    Draw_Params* params = cp.get();
 
     uint group_id = dispatch_id.x;
     if (group_id >= params.group_count) return;
@@ -16,7 +16,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     // draw per (domain, pipeline) group without knowing GPU compaction order.
     // The draw_count atomic survives for stats only.
     InterlockedAdd(params.draw_count[0], 1u);
-#if JAY_DEBUG
+#if DEBUG
     if (params.counters != nullptr) InterlockedAdd(params.counters[18u], 1u); // debug: draw commands emitted
 #endif
 

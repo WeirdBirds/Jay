@@ -1,6 +1,6 @@
-#include "../jay_api.slang"
+#include "jay.slang"
 
-[shader("vertex")]
+// Ordinary function: the generated _jay_main wrapper is the entry point.
 Vertex_Output main(uint vertex_id : SV_VulkanVertexID, uint instance_id : SV_VulkanInstanceID) {
     Vertex_Params* params = vp.get();
 

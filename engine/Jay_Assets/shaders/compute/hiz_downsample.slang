@@ -92,7 +92,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
                 g_samplers[params.sampler_index], uv11, 0.0).x;
 
             value = min(min(d00, d10), min(d01, d11));
-#if JAY_DEBUG
+#if DEBUG
             if (value == 0.0 && params.counters != nullptr) {
                 InterlockedAdd(params.counters[2], 1u);
             }
@@ -112,7 +112,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
         }
     }
 
-#if JAY_DEBUG
+#if DEBUG
     if (params.counters != nullptr) {
         if (params.mode == 0u) {
             InterlockedAdd(params.counters[0], 1u);

@@ -1,10 +1,9 @@
-#include "../jay_api.slang"
-
+#include "jay.slang"
 [shader("compute")]
 [numthreads(1, 1, 1)]
 void main(uint3 dispatch_id : SV_DispatchThreadID) {
 
-    Draw_Params* params = p.get();
+    Draw_Params* params = cp.get();
 
     uint sum = 0;
 
@@ -18,7 +17,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     }
 
     params.total_visible[0] = sum;
-#if JAY_DEBUG
+#if DEBUG
     // Debug slot [19] holds the pass-A visible total (the Frame log's vis).
     // Chain B reports nothing here — its prefix would overwrite pass A's number.
     if (params.cull_mode == 0u && params.counters != nullptr) {

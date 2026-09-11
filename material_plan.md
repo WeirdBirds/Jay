@@ -11,7 +11,7 @@ Shader authors do not declare Jay marker globals. They do not access instance re
 A fragment material function is an ordinary, non-entry Slang function. Its first argument is always `Vertex_Output`. Later arguments define the material schema in declaration order.
 
 ```slang
-#include "../jay_api.slang"
+#include "jay.slang"
 
 struct Textured_Params {
     float4 base_color;
@@ -33,9 +33,9 @@ float4 main(
 }
 ```
 
-V1 accepts one struct parameter, zero or more `Texture2D` parameters, and zero or more `SamplerState` parameters. The struct contains fixed material constants. Texture and sampler arguments resolve through the material blob's bindless resource slots.
+Material stages accept reflected struct parameters, `Texture2D` parameters, and `SamplerState` parameters. Structs contain fixed material constants. Texture and sampler arguments resolve through the material blob's bindless resource slots.
 
-Unsupported function parameter types fail material generation with a shader-path error. Vertex material arguments, arrays, cubemaps, shared references, and multiple struct parameters remain future work. The renderer does not silently fall back to marker globals or a second material path.
+Unsupported function parameter types fail material generation with a shader-path error. Arrays, cubemaps, shared references, and resource arrays remain future work. The renderer does not silently fall back to marker globals or a second material path.
 
 ## Generated Entry Point
 
@@ -61,7 +61,7 @@ The wrapper resolves the blob once per fragment. Native texture and sampler valu
 
 ## CPU Recipe API
 
-`Material(vertex, fragment, domain)` reflects the vertex and fragment shader sources at compile time. V1 vertex shaders keep their native entry signature and have no material arguments.
+`Material(vertex, fragment, domain)` reflects vertex and fragment shader sources at compile time. Generated wrappers preserve each authored `main` signature while supplying reflected material arguments.
 
 For the fragment function above, generated Jai recipe fields are:
 
@@ -71,7 +71,7 @@ recipe.fragment.albedo = Name.static("/textures/base_color.png");
 recipe.fragment.normal = Name.static("/textures/normal.png");
 ```
 
-`upload_material` resolves texture names through the asset system, writes bindless indices and packed constants into one GPU allocation, and returns a direct `Material_Id` GPU pointer. Identical packed recipes deduplicate. `release_material` decrements the reference count and frees the allocation when it reaches zero.
+`upload_material` resolves texture names through the asset system, writes bindless indices and packed constants into one GPU allocation, and returns a direct `Material_Id` GPU pointer. Identical packed recipes deduplicate.
 
 ## Blob Layout
 
@@ -90,9 +90,9 @@ Resource slot order follows function argument order, skipping the first `Vertex_
 
 Each `Mesh_Instance` stores one direct material blob pointer. GPU culling preserves the visible instance ID. The vertex shader forwards it to the fragment shader. Generated `_jay_main` uses that ID to load the correct material blob.
 
-Draw groups select a pipeline and mesh. They do not select a material instance. Many material blobs may share one pipeline.
+Draw groups select a domain-local pipeline and mesh. They do not select a material instance. Many material blobs may share one pipeline.
 
-Opaque and translucent domains remain explicit in `Material(..., domain)`. Opaque renders first with depth writes. Translucent uses weighted blended order-independent transparency: it accumulates weighted premultiplied color in `R16G16B16A16_SFLOAT`, multiplies revealage in `R16_SFLOAT`, then composites once over opaque color. Transparent material draw order does not affect this result. The method is approximate, but needs one transparent draw pass and one fullscreen composite pass.
+Opaque and translucent domains remain explicit in `Material(..., domain)`. Opaque renders first with depth writes. Translucent uses weighted order-independent accumulation: it stores weighted premultiplied color in `R16G16B16A16_SFLOAT`, stores remaining coverage in `R16_SFLOAT`, then composites once over opaque color. Translucent material draw order does not affect this result. The method is approximate, but needs one translucent draw pass and one fullscreen composite pass.
 
 ## Validation
 
