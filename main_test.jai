@@ -1,7 +1,6 @@
-#import "Basic"()(MEMORY_DEBUGGER = true);
+#import "Basic";
 #import "Jay_ECS";
 #import "Jay_Logger";
-#import "Jay_SRender";
 
 Component1 :: struct {
     val1: s32;
@@ -23,15 +22,6 @@ Component4 :: struct {
     valc2: Entity;
 }
 
-Test_Stages :: enum_flags u64 {
-    Q_ITER;
-    Q_EACH;
-    Q_RANDOM;
-    DEFAULT;
-    BATCH;
-    MAX;
-}
-
 SOME_COUNT :: 999;
 
 
@@ -39,14 +29,7 @@ main :: () {
 
     context.logger = jay_logger;
 
-    world: World(systems = .[
-        System(test_iter, xx Test_Stages.Q_ITER),
-        System(test_each, xx Test_Stages.Q_EACH),
-        System(test_random, xx Test_Stages.Q_RANDOM),
-        System(test_default, xx Test_Stages.DEFAULT),
-        System(test_bach, xx Test_Stages.BACH),
-        System(additional, xx Test_Stages.MAX) 
-    ]);
+    world: World(.[test_iter, test_each, test_random, test_default, test_bach, additional, bench_spawn, bench_touch, bench_reap, bench_on_created, bench_on_changed, bench_on_destroyed]);
 
     for 0..SOME_COUNT {
         components: [..]Any;
@@ -68,54 +51,19 @@ main :: () {
                 array_add(*components, Destruction2);
         }
 
-        new_entity(world, components);
+        new_entity(*world, components);
     }
     // dump(world);
 
     // log("=== === === === === === === === === === === === ");
     for 0..9 {
-        
-        {
-            start := current_time_consensus();
-            progress(*world, 0.1, Test_Stages.DEFAULT);
-            log("DEFAULT: % μs", to_microseconds(current_time_consensus() - start));
-        }
-        {
-            start := current_time_consensus();
-            progress(*world, 0.1, Test_Stages.DEFAULT);
-            log("DEFAULT: % μs", to_microseconds(current_time_consensus() - start));
-        }
-
-        {
-            start := current_time_consensus();
-            progress(*world, 0.1, Test_Stages.Q_EACH);
-            log("EACH:    % μs", to_microseconds(current_time_consensus() - start));
-        }
-
-        {
-            start := current_time_consensus();
-            progress(*world, 0.1, Test_Stages.Q_ITER);
-            log("ITER:    % μs", to_microseconds(current_time_consensus() - start));
-        }
-
-        {
-            start := current_time_consensus();
-            progress(*world, 0.1, Test_Stages.Q_RANDOM);
-            log("RANDOM:  % μs", to_microseconds(current_time_consensus() - start));
-        }
-
-
-        {
-            start := current_time_consensus();
-            progress(*world, 0.1, Test_Stages.BACH);
-            log("BACH:  % μs", to_microseconds(current_time_consensus() - start));
-        }
-        log("------------------------");
+        start := current_time_consensus();
+        progress(*world, 0.1);
+        log("TICK %: % μs created=% changed=% destroyed=%", it, to_microseconds(current_time_consensus() - start), bench_created, bench_changed, bench_destroyed);
     }
 
     // dump(world);
     free(world);
-    report_memory_leaks(.{});
 
     log("%", test_bach);
 }
@@ -162,7 +110,7 @@ test_random :: inline (query: Query(Component1, Component2, Component3, Componen
         c1 := get(it, Component1);
         c2 := get(it, Component2);
         c3 := get(it, Component3);
-        c4: Component4 = get(it, Component4);
+        c4 := get(it, Component4);
 
         c1.val1 += 1;
         c2.vala1 += 1;
@@ -173,18 +121,42 @@ test_random :: inline (query: Query(Component1, Component2, Component3, Componen
 
 
 test_bach :: inline (e: []Entity, c1: []Component1, c2: []Component2, c3: []Component3, c4: []Component4) {
-    for e
-        log("Entity % batch touched", it); 
-    for 0..3 {
+    for 0..e.count-1 {
         // print("% ", it);
         c1[it].val1 += 1;
         c2[it].vala1 += 1;
         c3[it].valb1 += 1;
         c4[it].valc2.index += 1;
     }
-} @bach_size:8
+} @batch_size:8
 
 Destruction1 :: struct {v: s32;}
 Destruction2 :: struct {v: s64;}
 
 additional :: (d1: Destruction1, d2: Destruction2) {}
+
+// --- Reactive benchmark: spawn 10/tick, touch a subset, reap 3/tick ---
+bench_created := 0;
+bench_changed := 0;
+bench_destroyed := 0;
+
+bench_spawn :: () {
+    for 0..9 new_entity(Component1.{xx it, "S"}, Component3.{});
+}
+
+bench_touch :: (e: Entity, c1: *Component1) {
+    if c1.val1 % 7 == 0 set(e, Component1.{c1.val1, c1.val2});
+} @after:bench_spawn
+
+bench_reap :: (query: Query(Component1)) {
+    n := 0;
+    for query {
+        if n >= 3 break;
+        destroy(it);
+        n += 1;
+    }
+} @after:bench_touch
+
+bench_on_created :: (e: Entity, ev: Component_Event(Component1)) { bench_created += 1; } @on:created(Component1)
+bench_on_changed :: (e: Entity, ev: Component_Event(Component1)) { bench_changed += 1; } @on:changed(Component1)
+bench_on_destroyed :: (e: Entity, ev: Component_Event(Component1)) { bench_destroyed += 1; } @on:destroyed(Component1)

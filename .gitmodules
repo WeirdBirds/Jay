@@ -1,39 +1,30 @@
 [submodule "engine/Jay_Core"]
 	path = engine/Jay_Core
-	url = git@github.com:BlueJayEngine/Jay_Core.git
+	url = https://github.com/WeirdBirds/Jay_Core.git
 [submodule "engine/Jay_ECS"]
 	path = engine/Jay_ECS
-	url = git@github.com:BlueJayEngine/Jay_ECS.git
+	url = https://github.com/WeirdBirds/Jay_ECS.git
 [submodule "engine/Jay_Math"]
 	path = engine/Jay_Math
-	url = git@github.com:BlueJayEngine/Jay_Math.git
+	url = https://github.com/WeirdBirds/Jay_Math.git
 [submodule "engine/Jay_Logger"]
 	path = engine/Jay_Logger
-	url = git@github.com:BlueJayEngine/Jay_Logger.git
-[submodule "engine/Slang"]
-	path = engine/Slang
-	url = git@github.com:rytc/slang-jai.git
-[submodule "engine/jai-vma"]
-	path = engine/jai-vma
-	url = https://gitlab.com/Stowy/jai-vma.git
+	url = https://github.com/WeirdBirds/Jay_Logger.git
 [submodule "engine/Jay_Render"]
 	path = engine/Jay_Render
-	url = https://github.com/BlueJayEngine/Jay_Render.git
+	url = https://github.com/WeirdBirds/Jay_Render.git
 [submodule "engine/jai-sdl3"]
 	path = engine/jai-sdl3
 	url = https://github.com/NickTsaizer/jai-sdl3.git
 [submodule "engine/Jay_Utils"]
 	path = engine/Jay_Utils
-	url = https://github.com/BlueJayEngine/Jay_Utils.git
-[submodule "engine/Jay_Vulkan"]
-	path = engine/Jay_Vulkan
-	url = https://github.com/BlueJayEngine/Jay_Vulkan
+	url = https://github.com/WeirdBirds/Jay_Utils.git
 [submodule "modules/tracy"]
 	path = modules/tracy
-	url = https://github.com/BlueJayEngine/tracy.git
+	url = https://github.com/WeirdBirds/tracy.git
 [submodule "engine/Jay_Package"]
 	path = engine/Jay_Package
-	url = https://github.com/BlueJayEngine/Jay_Package.git
+	url = https://github.com/WeirdBirds/Jay_Package.git
 [submodule "engine/sgpu"]
 	path = engine/sgpu
-	url = https://github.com/NickTsaizer/sgpu.git
+	url = https://github.com/WeirdBirds/sgpu.git

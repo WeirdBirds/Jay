@@ -1,6 +1,7 @@
 #import "Basic"()(MEMORY_DEBUGGER = true);
 #import "Jay_Render"(DEBUG = true, RENDER_CAPTURE = true);
 #import "Jay_Core";
+#import "Jay_ECS";
 
 Demo_Scene :: struct {
 
@@ -12,7 +13,8 @@ Demo_Scene :: struct {
 
         Color_Material :: Material(
             "/shaders/vertex/opaque.slang",
-            "/shaders/fragment/opaque.slang",
+            "/shaders/fragment/textured.slang",
+            .TRANSLUCENT
         );
 
         Translucent_Color_Material :: Material(
@@ -24,15 +26,17 @@ Demo_Scene :: struct {
         colored := Color_Material.{
             fragment = .{
                 params = .{
-                    base_color = Vec4.{1, 0, 1, 0.8},
-                }
-            }
+                    base_color = Vec4.{1, 1, 1, 0.8},
+                },
+                albedo = Name.static("/textures/Camera_Base_color.png"),
+                normal = Name.static("/textures/Camera_Normal_DirectX.png")
+            }, 
         };
 
         translucent_colored := Translucent_Color_Material.{
             fragment = .{
                 params = .{
-                    base_color = Vec4.{1, 0.3, 0.2, 0.35},
+                    base_color = Vec4.{1, 0.3, 0.2, 0.25},
                 }
             }
         };
@@ -77,6 +81,20 @@ Demo_Scene :: struct {
 }
 
 main :: () {
-    engine: Engine(Packages(Jay_Render, Demo_Scene));
+    engine: Engine(Packages(Jay_ECS(Systems, test)));
     run(*engine);
+}
+
+test :: () {
+    new_entity(Test_Struct);
+} @run_on:begin
+
+Test_Struct :: struct {
+    f: float32;
+}
+
+Systems :: struct {
+    system1 :: (e: Entity, t: Test_Struct) {
+        log("%: %", e.body, t.f);
+    }
 }

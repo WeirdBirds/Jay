@@ -64,8 +64,8 @@
             arg := args[i];
 
             if arg == {
-                case "release"; #through;
-                case "-release";
+                case "o"; #through;
+                case "-o";
                     build_options.backend = .LLVM;
                     set_optimization(*build_options, Optimization_Type.OPTIMIZED_VERY_SMALL, false);
                 case "debug"; #through;
