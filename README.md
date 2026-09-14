@@ -1,18 +1,17 @@
-# Jay (BlueJay Engine)
+# Jay Engine
 
 A game/rendering engine written in the **Jai** programming language.
 
 ## Overview
 
 Jay is a modular game engine built with Jai, featuring:
+
 - **ECS** - Archetype-based Entity Component System
 - **Rendering** - Vulkan renderer with SDL3 windowing
 - **Math** - Vectors, matrices, quaternions with SIMD support
 - **Logging** - Colored console logging with timestamps
 
 ## Building
-
-Requires the Jai compiler (expected at `~/jai/`).
 
 ```bash
 # Debug build (X64 backend, bounds checking ON)
@@ -43,10 +42,8 @@ Jay/
     Jay_Logger/          # Colored console logging
     Jay_Render/          # Vulkan renderer
     Jay_Utils/           # Utility functions
-    Jay_Vulkan/          # Vulkan API bindings
-    Slang/               # Shader compiler bindings
     jai-sdl3/            # SDL3 bindings
-    jai-vma/             # Vulkan Memory Allocator
+    sgpu/                # GPU abstraction
   assets/shaders/        # Slang shader sources
   bin/                   # Build output
 ```

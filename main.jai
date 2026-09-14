@@ -81,7 +81,7 @@ Demo_Scene :: struct {
 }
 
 main :: () {
-    engine: Engine(Packages(Jay_ECS(Systems, test)));
+    engine: Engine(Packages(Jay_Render, Jay_ECS(Systems, test)));
     run(*engine);
 }
 
