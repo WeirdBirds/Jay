@@ -124,8 +124,16 @@ import :: (in_path: string) -> Mesh_Data {
         }
     }
 
+    if verts.count == 0 || idxs.count == 0 return .{};
+
     result: Mesh_Data;
     result.vertices = verts;
-    result.indices  = idxs;
+    result.slot_count = 1;
+    result.indices[0] = idxs;
+    if !validate_mesh_import(*result) {
+        array_free(verts);
+        array_free(idxs);
+        return .{};
+    }
     return result;
 }

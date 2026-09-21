@@ -11,6 +11,7 @@ FBX_Parser :: struct {
     data:    string;
     offset:  s64;
     version: u32;
+    failed:  bool;
 }
 
 FBX_Node_Header :: struct {
@@ -32,6 +33,11 @@ FBX_Geometry :: struct {
     normal_reference: string;
     uv_mapping:       string;
     uv_reference:     string;
+
+    has_material_layer: bool;
+    material_mapping:   string;
+    material_reference: string;
+    material_indices:   [..]s32;
 }
 
 FBX_Geometry_Record :: struct {
@@ -46,6 +52,7 @@ FBX_Model :: struct {
     translation: Vec3;
     rotation: Vec3;
     scale: Vec3 = .{1, 1, 1};
+    material_ids: [..]u64;
 }
 
 FBX_Connection :: struct {
@@ -53,8 +60,14 @@ FBX_Connection :: struct {
     destination_id: u64;
 }
 
+FBX_Material_Slot :: struct {
+    material_id: u64;
+    indices: [..]u32;
+}
+
 import :: (in_path: string) -> Mesh_Data {
     data := read_entire_file(in_path);
+    defer free(data);
 
     if !is_binary_fbx(data) {
         log_error("FBX importer only supports binary FBX: %", in_path);
@@ -70,30 +83,72 @@ import :: (in_path: string) -> Mesh_Data {
     geometries:  [..] FBX_Geometry_Record;
     models:      [..] FBX_Model;
     connections: [..] FBX_Connection;
+    material_ids: [..] u64;
+    defer {
+        for record: geometries {
+            array_free(record.geometry.positions);
+            array_free(record.geometry.polygon_indices);
+            array_free(record.geometry.normals);
+            array_free(record.geometry.normal_indices);
+            array_free(record.geometry.uvs);
+            array_free(record.geometry.uv_indices);
+            array_free(record.geometry.material_indices);
+        }
+        for model: models array_free(model.material_ids);
+        array_free(geometries);
+        array_free(models);
+        array_free(connections);
+        array_free(material_ids);
+    }
 
     while can_read_node_header(*parser) {
-        if !parse_fbx_node(*parser, *geometries, *models, *connections) then break;
+        if !parse_fbx_node(*parser, *geometries, *models, *connections, *material_ids) then break;
+    }
+    if parser.failed return .{};
+
+    resolve_fbx_connections(geometries, *models, connections, material_ids);
+
+    vertices: [..]Vertex;
+    slots: [..]FBX_Material_Slot;
+    result: Mesh_Data;
+    success := false;
+    defer {
+        if !success {
+            array_free(vertices);
+            for slot: slots array_free(slot.indices);
+        }
+        array_free(slots);
     }
 
-    resolve_fbx_connections(geometries, *models, connections);
-
-    vertices: [..] Vertex;
-    indices:  [..] u32;
     for *record: geometries {
-        model := find_fbx_model(models, record.id);
-        append_geometry_mesh(*record.geometry, model, models, *vertices, *indices);
+        bound := false;
+        for *model: models {
+            if model.geometry_id != record.id continue;
+            bound = true;
+            if !append_geometry_mesh(*record.geometry, model, models, *vertices, *slots) return .{};
+        }
+        if !bound {
+            if !append_geometry_mesh(*record.geometry, null, models, *vertices, *slots) return .{};
+        }
     }
 
-    if vertices.count == 0 || indices.count == 0 {
+    if vertices.count == 0 || slots.count == 0 {
         log_error("FBX contains no supported mesh geometry: %", in_path);
         return .{};
     }
+    if slots.count > result.indices.count {
+        log_error("FBX has % material slots; mesh capacity is %", slots.count, result.indices.count);
+        return .{};
+    }
+    for slot, i: slots {
+        generate_missing_normals(*vertices, slot.indices);
+        result.indices[i] = slot.indices;
+    }
 
-    generate_missing_normals(*vertices, indices);
-
-    result: Mesh_Data;
     result.vertices = vertices;
-    result.indices  = indices;
+    result.slot_count = cast(u32) slots.count;
+    if !validate_mesh_import(*result) return .{};
+    success = true;
     return result;
 }
 
@@ -115,12 +170,13 @@ get_node_header_size :: (version: u32) -> s64 {
     return 13;
 }
 
-parse_fbx_node :: (p: *FBX_Parser, geometries: *[..]FBX_Geometry_Record, models: *[..]FBX_Model, connections: *[..]FBX_Connection) -> bool {
+parse_fbx_node :: (p: *FBX_Parser, geometries: *[..]FBX_Geometry_Record, models: *[..]FBX_Model, connections: *[..]FBX_Connection, material_ids: *[..]u64) -> bool {
     header := read_node_header(p);
     if header.end_offset == 0 then return false;
     if header.end_offset > p.data.count {
         log_error("FBX node '%' extends past file end", header.name);
         p.offset = p.data.count;
+        p.failed = true;
         return false;
     }
 
@@ -129,6 +185,13 @@ parse_fbx_node :: (p: *FBX_Parser, geometries: *[..]FBX_Geometry_Record, models:
         record.id = read_u64_property(p);
         parse_geometry_children(p, header.end_offset, header.property_count - 1, *record.geometry);
         array_add(geometries, record);
+        p.offset = header.end_offset;
+        return true;
+    }
+
+    if header.name == "Material" {
+        // Only identity is needed to merge geometry. Material properties stay in the caller.
+        array_add(material_ids, read_u64_property(p));
         p.offset = header.end_offset;
         return true;
     }
@@ -149,7 +212,7 @@ parse_fbx_node :: (p: *FBX_Parser, geometries: *[..]FBX_Geometry_Record, models:
 
     skip_properties(p, header.property_count);
     while p.offset < header.end_offset {
-        if !parse_fbx_node(p, geometries, models, connections) then break;
+        if !parse_fbx_node(p, geometries, models, connections, material_ids) then break;
     }
     p.offset = header.end_offset;
     return true;
@@ -229,11 +292,15 @@ parse_fbx_connection :: (p: *FBX_Parser, property_count: s64) -> FBX_Connection 
     return connection;
 }
 
-resolve_fbx_connections :: (geometries: []FBX_Geometry_Record, models: *[..]FBX_Model, connections: []FBX_Connection) {
+resolve_fbx_connections :: (geometries: []FBX_Geometry_Record, models: *[..]FBX_Model, connections: []FBX_Connection, material_ids: []u64) {
     for connection: connections {
         if find_fbx_geometry(geometries, connection.source_id) {
             model := find_fbx_model_by_id(models.*, connection.destination_id);
             if model then model.geometry_id = connection.source_id;
+        } else if array_find(material_ids, connection.source_id) {
+            model := find_fbx_model_by_id(models.*, connection.destination_id);
+            // Connection order defines the model-local material index table.
+            if model then array_add(*model.material_ids, connection.source_id);
         } else if find_fbx_model_by_id(models.*, connection.source_id) {
             model := find_fbx_model_by_id(models.*, connection.source_id);
             model.parent_id = connection.destination_id;
@@ -244,11 +311,6 @@ resolve_fbx_connections :: (geometries: []FBX_Geometry_Record, models: *[..]FBX_
 find_fbx_geometry :: (geometries: []FBX_Geometry_Record, id: u64) -> bool {
     for record: geometries if record.id == id then return true;
     return false;
-}
-
-find_fbx_model :: (models: []FBX_Model, geometry_id: u64) -> *FBX_Model {
-    for *model: models if model.geometry_id == geometry_id then return model;
-    return null;
 }
 
 find_fbx_model_by_id :: (models: []FBX_Model, id: u64) -> *FBX_Model {
@@ -263,21 +325,35 @@ parse_geometry_children :: (p: *FBX_Parser, end_offset: s64, property_count: s64
         child := read_node_header(p);
         if child.end_offset == 0 then break;
 
-        if child.name == "Vertices" {
-            read_vec3_array_property(p, *geom.positions);
-        } else if child.name == "PolygonVertexIndex" {
-            read_s32_array_property(p, *geom.polygon_indices);
-        } else if child.name == "LayerElementNormal" {
-            parse_layer_element_normal(p, child.end_offset, child.property_count, geom);
-            p.offset = child.end_offset;
-            continue;
-        } else if child.name == "LayerElementUV" {
-            parse_layer_element_uv(p, child.end_offset, child.property_count, geom);
-            p.offset = child.end_offset;
-            continue;
-        } else {
-            skip_properties(p, child.property_count);
-        }
+        if child.name == {
+            case "Vertices"; {
+                read_vec3_array_property(p, *geom.positions);
+            }
+
+            case "PolygonVertexIndex"; {
+                read_s32_array_property(p, *geom.polygon_indices);
+            }
+
+            case "LayerElementNormal"; {
+                parse_layer_element_normal(p, child.end_offset, child.property_count, geom);
+                p.offset = child.end_offset;
+                continue;
+            }
+
+            case "LayerElementUV"; {
+                parse_layer_element_uv(p, child.end_offset, child.property_count, geom);
+                p.offset = child.end_offset;
+                continue;
+            }
+            case "LayerElementMaterial"; {
+                parse_layer_element_material(p, child.end_offset, child.property_count, geom);
+            }
+            case; {
+                skip_properties(p, child.property_count);
+            }
+        } 
+
+
 
         p.offset = child.end_offset;
     }
@@ -329,30 +405,122 @@ parse_layer_element_uv :: (p: *FBX_Parser, end_offset: s64, property_count: s64,
     }
 }
 
-append_geometry_mesh :: (geom: *FBX_Geometry, model: *FBX_Model, models: []FBX_Model, vertices: *[..]Vertex, indices: *[..]u32) {
-    if geom.positions.count == 0 || geom.polygon_indices.count == 0 then return;
+
+parse_layer_element_material :: (p: *FBX_Parser, end_offset: s64, property_count: s64, geom: *FBX_Geometry) {
+    if geom.has_material_layer {
+        log_error("FBX has multiple material layers; only one is supported");
+        p.failed = true;
+        return;
+    }
+    geom.has_material_layer = true;
+    skip_properties(p, property_count);
+
+    while p.offset < end_offset {
+        child := read_node_header(p);
+        if child.end_offset == 0 then break;
+
+        if child.name == "MappingInformationType" {
+            geom.material_mapping = read_first_string_property(p);
+        } else if child.name == "ReferenceInformationType" {
+            geom.material_reference = read_first_string_property(p);
+        } else if child.name == "Materials" {
+            read_s32_array_property(p, *geom.material_indices);
+        } else {
+            skip_properties(p, child.property_count);
+        }
+        p.offset = child.end_offset;
+    }
+}
+
+append_geometry_mesh :: (geom: *FBX_Geometry, model: *FBX_Model, models: []FBX_Model, vertices: *[..]Vertex, slots: *[..]FBX_Material_Slot) -> bool {
+    if geom.positions.count == 0 || geom.polygon_indices.count == 0 then return true;
+
+    polygon_count: s64;
+    for index: geom.polygon_indices if index < 0 then polygon_count += 1;
+    if geom.has_material_layer {
+        if geom.material_reference != "IndexToDirect" && geom.material_reference != "Index" {
+            log_error("FBX unsupported material reference: %", geom.material_reference);
+            return false;
+        }
+        expected: s64;
+        if geom.material_mapping == "AllSame" {
+            expected = 1;
+        } else if geom.material_mapping == "ByPolygon" {
+            expected = polygon_count;
+        } else {
+            log_error("FBX unsupported material mapping: %", geom.material_mapping);
+            return false;
+        }
+        if geom.material_indices.count != expected {
+            log_error("FBX material assignment count mismatch: expected %, got %", expected, geom.material_indices.count);
+            return false;
+        }
+    } else if model && model.material_ids.count > 1 {
+        log_error("FBX model % has multiple materials but no polygon assignments", model.id);
+        return false;
+    }
 
     face: [..]u32;
-    polygon_vertex: s64 = 0;
+    defer array_free(face);
+    polygon: s64;
 
-    for raw_index: geom.polygon_indices {
+    for raw_index, polygon_vertex: geom.polygon_indices {
         source_index := raw_index;
-        end_polygon := false;
-        if source_index < 0 {
-            source_index = -source_index - 1;
-            end_polygon = true;
+        end_polygon := source_index < 0;
+        if end_polygon then source_index = ~source_index;
+        if source_index >= geom.positions.count {
+            log_error("FBX polygon vertex % is outside the position array", source_index);
+            return false;
         }
 
         vertex_index := append_fbx_vertex(geom, model, models, source_index, polygon_vertex, vertices);
         array_add(*face, vertex_index);
-
-        if end_polygon {
-            triangulate_face(face, indices);
-            array_resize(*face, 0);
+        if !end_polygon continue;
+        if face.count < 3 {
+            log_error("FBX polygon % has fewer than three vertices", polygon);
+            return false;
         }
 
-        polygon_vertex += 1;
+        material_id, valid := get_polygon_material(geom, model, polygon);
+        if !valid return false;
+        slot: *FBX_Material_Slot;
+        for *candidate: slots.* {
+            if candidate.material_id == material_id {
+                slot = candidate;
+                break;
+            }
+        }
+        if !slot {
+            array_add(slots, .{material_id = material_id});
+            slot = *slots.*[slots.count - 1];
+        }
+        triangulate_face(face, *slot.indices);
+        array_resize(*face, 0);
+        polygon += 1;
     }
+
+    if face.count != 0 {
+        log_error("FBX polygon is missing its final vertex marker");
+        return false;
+    }
+    return true;
+}
+
+get_polygon_material :: (geom: *FBX_Geometry, model: *FBX_Model, polygon: s64) -> (id: u64, valid: bool) {
+    if !geom.has_material_layer {
+        if model && model.material_ids.count == 1 return model.material_ids[0], true;
+        return 0, true;
+    }
+
+    assignment := ifx geom.material_mapping == "AllSame" then 0 else polygon;
+    index := geom.material_indices[assignment];
+    // FBX -1 means unassigned. All unassigned polygons share one caller-owned slot.
+    if index == -1 return 0, true;
+    if index < -1 || !model || index >= model.material_ids.count {
+        log_error("FBX polygon % references invalid model-local material index %", polygon, index);
+        return 0, false;
+    }
+    return model.material_ids[index], true;
 }
 
 append_fbx_vertex :: (geom: *FBX_Geometry, model: *FBX_Model, models: []FBX_Model, position_index: s32, polygon_vertex: s64, vertices: *[..]Vertex) -> u32 {
@@ -462,6 +630,7 @@ generate_missing_normals :: (vertices: *[..]Vertex, indices: []u32) {
 
     accum: [..]Vec3;
     array_resize(*accum, vertices.count);
+    defer array_free(accum);
 
     i: s64 = 0;
     while i <= indices.count - 3 {
@@ -486,6 +655,7 @@ generate_missing_normals :: (vertices: *[..]Vertex, indices: []u32) {
     }
 
     for *vtx, idx: vertices.* {
+        if length(vtx.normal) > 0.000001 continue;
         len := length(accum[idx]);
         if len > 0.000001 then vtx.normal = accum[idx] / len;
     }
